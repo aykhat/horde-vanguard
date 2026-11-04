@@ -1,0 +1,15 @@
+body {
+margin: 0;
+padding: 0;
+background-color: #0f172a;
+display: flex;
+justify-content: center;
+align-items: center;
+height: 100vh;
+overflow: hidden;
+font-family: 'Inter', sans-serif;
+}
+canvas {
+border-radius: 8px;
+box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+}
