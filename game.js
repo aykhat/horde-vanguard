@@ -19,14 +19,14 @@ scene("main", () => {
         hp: 100,
         xp: 0,
         level: 1,
-        xpToNextLevel: 10,
+        xpToNextLevel: 18, // Increased initial XP requirement for balanced progression
         kills: 0,
         gold: 15,
         totalGoldSpent: 0,
         totalDamageDealt: 0,
         totalDamageTaken: 0,
         currentWave: 1,
-        waveTimer: 60,
+        waveTimer: 35, // 35s wave timer
         isWaveActive: true,
         playerSpeed: 240,
         magnetRadius: 150,
@@ -39,6 +39,9 @@ scene("main", () => {
         activeMythics: [],
         mythicStacks: {}
     };
+
+    let miniBossSpawned = false;
+    let finalBossSpawned = false;
 
     const uiBox = add([fixed(), z(100)]);
 
@@ -80,7 +83,7 @@ scene("main", () => {
     ]);
 
     const waveText = uiBox.add([
-        text(`WAVE: ${gameState.currentWave} (Time: 60s)`, { size: 22 }),
+        text(`WAVE: ${gameState.currentWave} (Time: 35s)`, { size: 22 }),
         pos(30, 138),
         color(168, 85, 247),
     ]);
@@ -197,14 +200,14 @@ scene("main", () => {
     player.onCollide("gem", (gem) => {
         destroy(gem);
         playSound('gem');
-        gameState.xp += (gem.value || 1);
-        gameState.gold += (gem.value || 1);
-        killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold}`;
+        gameState.xp += (gem.value || 0.5);
+        gameState.gold += (gem.value || 0.5);
+        killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold.toFixed(2)}`;
 
         if (gameState.xp >= gameState.xpToNextLevel) {
             gameState.level++;
             gameState.xp -= gameState.xpToNextLevel;
-            gameState.xpToNextLevel = Math.floor(gameState.xpToNextLevel * 1.5);
+            gameState.xpToNextLevel = Math.floor(gameState.xpToNextLevel * 1.65); // Slower XP scaling
             playSound('levelup');
             showLevelUpMenu();
         }
@@ -415,13 +418,15 @@ scene("main", () => {
                 showLevelUpMenu();
             } else if (action === 'skipwave') {
                 gameState.currentWave = (val > 0 ? val : gameState.currentWave + 1);
-                gameState.waveTimer = 60;
+                gameState.waveTimer = gameState.currentWave === 10 ? 120 : (gameState.currentWave === 20 ? 180 : 35);
+                miniBossSpawned = false;
+                finalBossSpawned = false;
                 get("enemy").forEach(e => destroy(e));
                 consoleOpen = false;
                 cheatOverlay.style.display = 'none';
                 gameState.isPaused = false;
                 gameState.isWaveActive = true;
-                waveText.text = `WAVE: ${gameState.currentWave} (Time: 60s)`;
+                waveText.text = `WAVE: ${gameState.currentWave} (Time: ${gameState.waveTimer}s)`;
             }
             cheatInput.value = '';
         }
@@ -440,42 +445,33 @@ scene("main", () => {
 
             if (gameState.waveTimer <= 0) {
                 get("enemy").forEach(e => destroy(e));
-                startShopPhase();
+                startShopPhase(false);
                 return;
             }
         } else {
+            gameState.waveTimer -= dt();
             const bossList = get("boss");
+            const bName = gameState.currentWave === 10 ? "MINI-BOSS" : "FINAL BOSS";
+
             if (bossList.length > 0) {
                 const b = bossList[0];
-                const bName = gameState.currentWave === 10 ? "MINI-BOSS" : "FINAL BOSS";
-                waveText.text = `WAVE: ${gameState.currentWave} (DEFEAT ${bName}!)`;
-                
                 const dirToBoss = b.pos.sub(player.pos);
                 bossIndicator.opacity = 1;
                 const angle = dirToBoss.angle();
                 bossIndicator.pos = center().add(vec2(Math.cos(angle * Math.PI / 180) * 320, Math.sin(angle * Math.PI / 180) * 220));
                 bossIndicator.text = `⚠️ ${bName} (${Math.round(dirToBoss.len())}m) ➔`;
+                waveText.text = `WAVE: ${gameState.currentWave} (DEFEAT ${bName}! ${Math.max(0, Math.ceil(gameState.waveTimer))}s)`;
             } else {
                 bossIndicator.opacity = 0;
-                if (gameState.waveTimer <= 0) {
-                    // If Wave 20 final boss defeated, trigger VICTORY screen!
-                    if (gameState.currentWave === 20) {
-                        cheatOverlay.remove();
-                        go("victory", {
-                            level: gameState.level,
-                            dmgDealt: Math.round(gameState.totalDamageDealt),
-                            dmgTaken: Math.round(gameState.totalDamageTaken),
-                            abilities: gameState.activeAbilities,
-                            mythics: gameState.activeMythics,
-                            mythicStacks: gameState.mythicStacks,
-                            goldSpent: gameState.totalGoldSpent,
-                            goldLeft: gameState.gold
-                        });
-                        return;
-                    }
-                    startShopPhase();
-                    return;
-                }
+                waveText.text = `WAVE: ${gameState.currentWave} (Time: ${Math.max(0, Math.ceil(gameState.waveTimer))}s)`;
+            }
+
+            // 120s / 180s Time Out Handler: If time runs out, boss retreats and player gets regular shop
+            if (gameState.waveTimer <= 0) {
+                get("enemy").forEach(e => destroy(e));
+                bossIndicator.opacity = 0;
+                startShopPhase(false);
+                return;
             }
         }
 
@@ -540,7 +536,10 @@ scene("main", () => {
             if (spawnPos.x >= -4900 && spawnPos.x <= 4900 && spawnPos.y >= -4900 && spawnPos.y <= 4900) {
                 const baseEnemyHp = 2 + Math.floor(gameState.currentWave * 1.2);
                 
-                if (gameState.currentWave === 10 && get("boss").length === 0) {
+                // Spawn Mini-Boss exactly ONCE during Wave 10
+                if (gameState.currentWave === 10 && !miniBossSpawned) {
+                    miniBossSpawned = true;
+                    gameState.waveTimer = 120; // Exact 2 minute timer
                     add([
                         sprite("miniboss"),
                         pos(spawnPos),
@@ -556,9 +555,11 @@ scene("main", () => {
                             isMiniBoss: true,
                         }
                     ]);
-                    gameState.waveTimer = -1; 
                 } 
-                else if (gameState.currentWave === 20 && get("boss").length === 0) {
+                // Spawn Final Boss exactly ONCE during Wave 20
+                else if (gameState.currentWave === 20 && !finalBossSpawned) {
+                    finalBossSpawned = true;
+                    gameState.waveTimer = 180;
                     add([
                         sprite("finalboss"),
                         pos(spawnPos),
@@ -574,7 +575,6 @@ scene("main", () => {
                             isFinalBoss: true,
                         }
                     ]);
-                    gameState.waveTimer = -1; 
                 }
 
                 if (!isBossWave || Math.random() < 0.35) {
@@ -597,21 +597,7 @@ scene("main", () => {
         }
     });
 
-    player.onCollide("enemy_bullet", (b) => {
-        if (gameState.isPaused || gameState.godMode) return;
-        destroy(b);
-        let dmg = b.damage || 15;
-        gameState.totalDamageTaken += dmg;
-        gameState.hp -= dmg;
-        playSound('hurt');
-        hpText.text = `HP: ${Math.max(0, Math.ceil(gameState.hp))}/${gameState.maxHp}`;
-        if (gameState.hp <= 0) {
-            cheatOverlay.remove();
-            go("gameover", { kills: gameState.kills, level: gameState.level });
-        }
-    });
-
-    function startShopPhase() {
+    function startShopPhase(isSpecialBossShop = false) {
         gameState.isWaveActive = false;
         gameState.isPaused = true;
         bossIndicator.opacity = 0;
@@ -620,6 +606,8 @@ scene("main", () => {
         hpText.text = `HP: ${Math.ceil(gameState.hp)}/${gameState.maxHp}`;
 
         playSound('mythic');
+
+        let isPickedInSpecialShop = false;
 
         const shopOverlay = add([
             rect(1280, 720),
@@ -631,14 +619,14 @@ scene("main", () => {
         ]);
 
         shopOverlay.add([
-            text(`WAVE ${gameState.currentWave} COMPLETED!`, { size: 36 }),
+            text(isSpecialBossShop ? `👑 SPECIAL BOSS REWARD SHOP!` : `WAVE ${gameState.currentWave} COMPLETED!`, { size: 36 }),
             pos(center().x, 50),
             anchor("center"),
-            color(52, 211, 153),
+            color(isSpecialBossShop ? rgb(245, 158, 11) : rgb(52, 211, 153)),
         ]);
 
         const goldDisplay = shopOverlay.add([
-            text(`Vanguard Supply Shop | Your Gold: $${gameState.gold}`, { size: 22 }),
+            text(`Vanguard Supply Shop | Your Gold: $${gameState.gold.toFixed(2)}`, { size: 22 }),
             pos(center().x, 90),
             anchor("center"),
             color(251, 191, 36),
@@ -647,15 +635,20 @@ scene("main", () => {
         function renderShopCards() {
             shopOverlay.get("shop_card").forEach(c => destroy(c));
 
-            const fullPool = [...upgradePool, ...uniqueAbilitiesPool, ...mythicPool];
+            let poolToUse = [...upgradePool, ...uniqueAbilitiesPool, ...mythicPool];
+            if (isSpecialBossShop) {
+                // Special Mini-boss shop pool: Only Legendary and Mythic items
+                poolToUse = poolToUse.filter(item => item.rarity === "Legendary" || item.rarity === "Mythic");
+            }
+
             const shopOptions = [];
 
             for (let i = 0; i < 3; i++) {
-                const totalWeight = fullPool.reduce((acc, card) => acc + card.weight, 0);
+                const totalWeight = poolToUse.reduce((acc, card) => acc + card.weight, 0);
                 let randomVal = Math.random() * totalWeight;
-                let selected = fullPool[0];
+                let selected = poolToUse[0];
 
-                for (let card of fullPool) {
+                for (let card of poolToUse) {
                     if (randomVal < card.weight) {
                         selected = card;
                         break;
@@ -663,11 +656,13 @@ scene("main", () => {
                     randomVal -= card.weight;
                 }
 
-                let price = 1;
-                if (selected.rarity === "Mythic") price = 20;
-                else if (selected.rarity === "Legendary") price = 15;
-                else if (selected.rarity === "Rare" || selected.rarity === "Unique Ability") price = 5;
-                else price = 1;
+                let price = isSpecialBossShop ? 0 : 1;
+                if (!isSpecialBossShop) {
+                    if (selected.rarity === "Mythic") price = 20;
+                    else if (selected.rarity === "Legendary") price = 15;
+                    else if (selected.rarity === "Unique Ability") price = 10;
+                    else if (selected.rarity === "Rare") price = 5;
+                }
 
                 shopOptions.push({ ...selected, price });
             }
@@ -715,19 +710,20 @@ scene("main", () => {
                 ]);
 
                 const btnText = chooseBtn.add([
-                    text(`BUY FOR $${option.price}`, { size: 15 }),
+                    text(isSpecialBossShop ? "CLAIM FREE REWARD" : `BUY FOR $${option.price}`, { size: 14 }),
                     pos(0, 0),
                     anchor("center"),
                     color(15, 23, 42),
                 ]);
 
                 card.onClick(() => {
+                    if (isSpecialBossShop && isPickedInSpecialShop) return;
                     if (gameState.gold < option.price) return;
 
                     gameState.gold -= option.price;
                     gameState.totalGoldSpent += option.price;
-                    goldDisplay.text = `Vanguard Supply Shop | Your Gold: $${gameState.gold}`;
-                    killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold}`;
+                    goldDisplay.text = `Vanguard Supply Shop | Your Gold: $${gameState.gold.toFixed(2)}`;
+                    killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold.toFixed(2)}`;
 
                     option.apply();
 
@@ -746,37 +742,50 @@ scene("main", () => {
 
                     updateTraitsDisplay();
                     chooseBtn.color = rgb(34, 197, 94);
-                    btnText.text = "PURCHASED!";
+                    btnText.text = "CLAIMED!";
+
+                    if (isSpecialBossShop) {
+                        isPickedInSpecialShop = true;
+                        rerollBtn.color = rgb(71, 85, 105);
+                        rerollBtnText.text = "LOCKED";
+                    }
                 });
             });
         }
 
-        renderShopCards();
-
         const rerollBtn = shopOverlay.add([
-            rect(180, 45, { radius: 8 }),
+            rect(200, 45, { radius: 8 }),
             pos(center().x - 120, center().y + 260),
             anchor("center"),
             color(234, 179, 8),
             area(),
         ]);
 
-        rerollBtn.add([
-            text("REROLL ($10)", { size: 15 }),
+        const rerollBtnText = rerollBtn.add([
+            text(isSpecialBossShop ? "FREE REROLL" : "REROLL ($10)", { size: 15 }),
             pos(0, 0),
             anchor("center"),
             color(15, 23, 42),
         ]);
 
         rerollBtn.onClick(() => {
+            if (isSpecialBossShop) {
+                if (!isPickedInSpecialShop) {
+                    renderShopCards();
+                }
+                return;
+            }
+
             if (gameState.gold >= 10) {
                 gameState.gold -= 10;
                 gameState.totalGoldSpent += 10;
-                goldDisplay.text = `Vanguard Supply Shop | Your Gold: $${gameState.gold}`;
-                killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold}`;
+                goldDisplay.text = `Vanguard Supply Shop | Your Gold: $${gameState.gold.toFixed(2)}`;
+                killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold.toFixed(2)}`;
                 renderShopCards();
             }
         });
+
+        renderShopCards();
 
         const nextWaveBtn = shopOverlay.add([
             rect(220, 45, { radius: 8 }),
@@ -796,8 +805,10 @@ scene("main", () => {
         nextWaveBtn.onClick(() => {
             destroy(shopOverlay);
             gameState.currentWave++;
-            gameState.waveTimer = 60;
-            waveText.text = `WAVE: ${gameState.currentWave} (Time: 60s)`;
+            miniBossSpawned = false;
+            finalBossSpawned = false;
+            gameState.waveTimer = gameState.currentWave === 10 ? 120 : (gameState.currentWave === 20 ? 180 : 35);
+            waveText.text = `WAVE: ${gameState.currentWave} (Time: ${gameState.waveTimer}s)`;
 
             gameState.isPaused = false;
             gameState.isWaveActive = true;
@@ -865,13 +876,17 @@ scene("main", () => {
         playSound('hit');
 
         if (enemy.hp <= 0) {
-            let gemValue = 1 + Math.floor(gameState.level * 0.3);
+            let isMini = enemy.isMiniBoss;
+            let isFinal = enemy.isFinalBoss;
+            let isBoss = isMini || isFinal;
+            let gemValue = isBoss ? 100 : 0.5;
+
             gameState.gold += gemValue;
 
             add([
-                circle(6 + Math.min(6, gemValue)),
-                color(52, 211, 153),
-                outline(2, rgb(16, 185, 129)),
+                circle(isBoss ? 16 : 5),
+                color(isBoss ? rgb(251, 191, 36) : rgb(52, 211, 153)),
+                outline(2, isBoss ? rgb(245, 158, 11) : rgb(16, 185, 129)),
                 pos(enemy.pos),
                 area(),
                 anchor("center"),
@@ -881,7 +896,29 @@ scene("main", () => {
 
             destroy(enemy);
             gameState.kills++;
-            killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold}`;
+            killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold.toFixed(2)}`;
+
+            // Victory upon defeating Final Boss on Wave 20
+            if (isFinal) {
+                cheatOverlay.remove();
+                go("victory", {
+                    level: gameState.level,
+                    dmgDealt: Math.round(gameState.totalDamageDealt),
+                    dmgTaken: Math.round(gameState.totalDamageTaken),
+                    abilities: gameState.activeAbilities,
+                    mythics: gameState.activeMythics,
+                    mythicStacks: gameState.mythicStacks,
+                    goldSpent: gameState.totalGoldSpent,
+                    goldLeft: gameState.gold
+                });
+                return;
+            }
+
+            // Defeated Mini-Boss on Wave 10 -> Despawn mobs & open Special Boss Supply Shop!
+            if (isMini) {
+                get("enemy").forEach(e => destroy(e));
+                startShopPhase(true);
+            }
         }
     });
 
