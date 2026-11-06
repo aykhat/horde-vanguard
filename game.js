@@ -5,8 +5,10 @@ kaplay({
     background: [15, 23, 42],
 });
 
-// Load the custom uploaded Spud enemy sprite from project files
-loadSprite("spudling", "Enemy.png");
+// Load the updated high-res Spud enemy sprite and custom boss sprites with exact filenames
+loadSprite("spudling", "enemy.png");
+loadSprite("miniboss", "mini_boss.png");
+loadSprite("finalboss", "final_boss.png");
 
 scene("main", () => {
     const gameState = {
@@ -16,8 +18,12 @@ scene("main", () => {
         hp: 100,
         xp: 0,
         level: 1,
-        xpToNextLevel: 8,
+        xpToNextLevel: 10, // Base XP to level up
         kills: 0,
+        gold: 0,
+        currentWave: 1,
+        waveTimer: 60,
+        isWaveActive: true,
         playerSpeed: 240,
         magnetRadius: 150,
         attackCooldown: 0.5,
@@ -44,21 +50,47 @@ scene("main", () => {
         color(59, 130, 246),
     ]);
 
-    const killText = uiBox.add([
-        text(`KILLS: ${gameState.kills}`, { size: 22 }),
+    // Visual XP Bar Container & Fill Indicator
+    const xpBarBg = uiBox.add([
+        rect(300, 14, { radius: 4 }),
         pos(30, 85),
+        color(30, 41, 59),
+        outline(2, rgb(71, 85, 105)),
+    ]);
+
+    const xpBarFill = uiBox.add([
+        rect(0, 14, { radius: 4 }),
+        pos(30, 85),
+        color(59, 130, 246),
+    ]);
+
+    function updateXpBar() {
+        const pct = Math.min(1, gameState.xp / gameState.xpToNextLevel);
+        xpBarFill.width = 300 * pct;
+        levelText.text = `LVL: ${gameState.level} (XP: ${gameState.xp}/${gameState.xpToNextLevel})`;
+    }
+
+    const killText = uiBox.add([
+        text(`KILLS: ${gameState.kills} | GOLD: $${gameState.gold}`, { size: 22 }),
+        pos(30, 108),
         color(251, 191, 36),
     ]);
 
+    const waveText = uiBox.add([
+        text(`WAVE: ${gameState.currentWave} (Time: 60s)`, { size: 22 }),
+        pos(30, 138),
+        color(168, 85, 247),
+    ]);
+
     const traitsContainer = uiBox.add([
-        pos(30, 115),
+        pos(30, 168),
     ]);
 
     const tooltipBox = uiBox.add([
         rect(240, 60, { radius: 6 }),
         color(15, 23, 42),
         outline(2, rgb(168, 85, 247)),
-        pos(30, 155),
+        pos(30, 208),
         opacity(0),
         z(150),
     ]);
@@ -146,14 +178,148 @@ scene("main", () => {
         if (player.pos.y < -4800) player.pos.y = -4800;
         if (player.pos.y > 4800) player.pos.y = 4800;
 
-        if (gameState.activeMythics.includes("Void Singularity")) {
-            get("gem").forEach(g => {
-                if (g.pos.dist(player.pos) < 600) {
-                    g.move(player.pos.sub(g.pos).unit().scale(350));
-                }
-            });
-        }
+        // Magnet logic for XP gems
+        get("gem").forEach(g => {
+            if (g.pos.dist(player.pos) < gameState.magnetRadius || gameState.activeMythics.includes("Void Singularity")) {
+                g.move(player.pos.sub(g.pos).unit().scale(350));
+            }
+        });
     });
+
+    // Player collect XP gem logic
+    player.onCollide("gem", (gem) => {
+        destroy(gem);
+        playSound('gem');
+        gameState.xp += (gem.value || 1);
+        gameState.gold += (gem.value || 1);
+        killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold}`;
+
+        // EXP Bar & Level up scaling logic
+        if (gameState.xp >= gameState.xpToNextLevel) {
+            gameState.level++;
+            gameState.xp -= gameState.xpToNextLevel;
+            // Progressively harder to level up as XP requirements scale exponentially
+            gameState.xpToNextLevel = Math.floor(gameState.xpToNextLevel * 1.5);
+            playSound('levelup');
+            showLevelUpMenu();
+        }
+        updateXpBar();
+    });
+
+    function showLevelUpMenu() {
+        gameState.isPaused = true;
+        
+        const menuOverlay = uiBox.add([
+            rect(1280, 720),
+            color(15, 23, 42),
+            opacity(0.92),
+            fixed(),
+            z(300),
+            area(),
+        ]);
+
+        menuOverlay.add([
+            text(`LEVEL UP! (LEVEL ${gameState.level})`, { size: 36 }),
+            pos(center().x, 80),
+            anchor("center"),
+            color(59, 130, 246),
+        ]);
+
+        menuOverlay.add([
+            text("Choose a Free Skill / Ability Boost", { size: 20 }),
+            pos(center().x, 120),
+            anchor("center"),
+            color(203, 213, 225),
+        ]);
+
+        const fullPool = [...upgradePool, ...uniqueAbilitiesPool, ...mythicPool];
+        const cardOptions = [];
+
+        for (let i = 0; i < 3; i++) {
+            const totalWeight = fullPool.reduce((acc, card) => acc + card.weight, 0);
+            let randomVal = Math.random() * totalWeight;
+            let selected = fullPool[0];
+
+            for (let card of fullPool) {
+                if (randomVal < card.weight) {
+                    selected = card;
+                    break;
+                }
+                randomVal -= card.weight;
+            }
+            cardOptions.push(selected);
+        }
+
+        cardOptions.forEach((option, idx) => {
+            const cardX = center().x + (idx - 1) * 360;
+            const cardY = center().y + 30;
+
+            const card = menuOverlay.add([
+                rect(320, 350, { radius: 12 }),
+                pos(cardX, cardY),
+                anchor("center"),
+                color(30, 41, 59),
+                outline(4, option.color),
+                area(),
+            ]);
+
+            card.add([
+                text(option.rarity.toUpperCase(), { size: 16 }),
+                pos(0, -130),
+                anchor("center"),
+                color(option.color),
+            ]);
+
+            card.add([
+                text(option.name, { size: 18, width: 280, align: "center" }),
+                pos(0, -90),
+                anchor("center"),
+                color(255, 255, 255),
+            ]);
+
+            card.add([
+                text(option.desc, { size: 15, width: 260, align: "center" }),
+                pos(0, -10),
+                anchor("center"),
+                color(203, 213, 225),
+            ]);
+
+            const chooseBtn = card.add([
+                rect(240, 48, { radius: 8 }),
+                pos(0, 110),
+                anchor("center"),
+                color(option.color),
+            ]);
+
+            chooseBtn.add([
+                text("SELECT ABILITY", { size: 15 }),
+                pos(0, 0),
+                anchor("center"),
+                color(15, 23, 42),
+            ]);
+
+            card.onClick(() => {
+                option.apply();
+
+                if (option.rarity === "Mythic") {
+                    if (!gameState.activeMythics.includes(option.name)) {
+                        gameState.activeMythics.push(option.name);
+                    }
+                    gameState.mythicStacks[option.name] = (gameState.mythicStacks[option.name] || 0) + 1;
+                }
+
+                if (option.rarity === "Unique Ability") {
+                    if (!gameState.activeAbilities.includes(option.name)) {
+                        gameState.activeAbilities.push(option.name);
+                    }
+                }
+
+                updateTraitsDisplay();
+                destroy(menuOverlay);
+                gameState.isPaused = false;
+            });
+        });
+    }
 
     onUpdate(() => {
         if (gameState.isPaused) return;
@@ -190,10 +356,10 @@ scene("main", () => {
 
     let consoleOpen = false;
     const cheatOverlay = document.createElement('div');
-    cheatOverlay.style.cssText = 'display:none; position:fixed; top:20px; left:50%; transform:translateX(-50%); width:500px; background:rgba(15, 23, 42, 0.95); border:2px solid #a855f7; border-radius:8px; padding:15px; z-index:99999; font-family:sans-serif; box-shadow:0 10px 25px rgba(0,0,0,0.7);';
+    cheatOverlay.style.cssText = 'display:none; position:fixed; top:20px; left:50%; transform:translateX(-50%); width:520px; background:rgba(15, 23, 42, 0.95); border:2px solid #a855f7; border-radius:8px; padding:15px; z-index:99999; font-family:sans-serif; box-shadow:0 10px 25px rgba(0,0,0,0.7);';
     cheatOverlay.innerHTML = `
         <div style="color:#a855f7; font-weight:bold; margin-bottom:8px; font-size:16px;">🛠️ DEV CHEAT CONSOLE</div>
-        <div style="color:#94a3b8; font-size:12px; margin-bottom:10px;">Commands: <b style="color:#f8fafc">godmode</b>, <b style="color:#f8fafc">addxp [num]</b>, <b style="color:#f8fafc">addhp [num]</b>, <b style="color:#f8fafc">speed [num]</b>, <b style="color:#f8fafc">killall</b>, <b style="color:#f8fafc">levelup</b></div>
+        <div style="color:#94a3b8; font-size:12px; margin-bottom:10px;">Commands: <b style="color:#f8fafc">godmode</b>, <b style="color:#f8fafc">addxp [num]</b>, <b style="color:#f8fafc">jumplevel [num]</b>, <b style="color:#f8fafc">skipwave [num]</b>, <b style="color:#f8fafc">addhp [num]</b>, <b style="color:#f8fafc">speed [num]</b>, <b style="color:#f8fafc">killall</b>, <b style="color:#f8fafc">levelup</b></div>
         <input id="cheatInput" type="text" placeholder="Type command here..." style="width:100%; padding:8px; background:#1e293b; border:none; color:white; border-radius:4px; box-sizing:border-box; outline:none;" />
     `;
     document.body.appendChild(cheatOverlay);
@@ -227,12 +393,21 @@ scene("main", () => {
                 if (gameState.xp >= gameState.xpToNextLevel) {
                     gameState.level++;
                     gameState.xp = 0;
-                    gameState.xpToNextLevel = Math.floor(gameState.xpToNextLevel * 1.6);
+                    gameState.xpToNextLevel = Math.floor(gameState.xpToNextLevel * 1.5);
                     consoleOpen = false;
                     cheatOverlay.style.display = 'none';
-                    showUpgradeMenu();
+                    showLevelUpMenu();
                 }
-                levelText.text = `LVL: ${gameState.level} (XP: ${gameState.xp}/${gameState.xpToNextLevel})`;
+                updateXpBar();
+            } else if (action === 'jumplevel') {
+                if (val > 0) {
+                    gameState.level = val;
+                    gameState.xp = 0;
+                    gameState.xpToNextLevel = Math.floor(10 * Math.pow(1.5, gameState.level - 1));
+                    consoleOpen = false;
+                    cheatOverlay.style.display = 'none';
+                    showLevelUpMenu();
+                }
             } else if (action === 'addhp') {
                 gameState.maxHp += (val > 0 ? val : 50);
                 gameState.hp = gameState.maxHp;
@@ -244,10 +419,19 @@ scene("main", () => {
             } else if (action === 'levelup') {
                 gameState.level++;
                 gameState.xp = 0;
-                gameState.xpToNextLevel = Math.floor(gameState.xpToNextLevel * 1.6);
+                gameState.xpToNextLevel = Math.floor(gameState.xpToNextLevel * 1.5);
                 consoleOpen = false;
                 cheatOverlay.style.display = 'none';
-                showUpgradeMenu();
+                showLevelUpMenu();
+            } else if (action === 'skipwave') {
+                gameState.currentWave = (val > 0 ? val : gameState.currentWave + 1);
+                gameState.waveTimer = 60;
+                get("enemy").forEach(e => destroy(e));
+                consoleOpen = false;
+                cheatOverlay.style.display = 'none';
+                gameState.isPaused = false;
+                gameState.isWaveActive = true;
+                waveText.text = `WAVE: ${gameState.currentWave} (Time: 60s)`;
             }
             cheatInput.value = '';
         }
@@ -452,9 +636,89 @@ scene("main", () => {
 
     let spawnTimer = 0;
     onUpdate(() => {
-        if (gameState.isPaused) return;
+        if (gameState.isPaused || !gameState.isWaveActive) return;
+
+        // Wave Timer & Survival Logic
+        const isBossWave = (gameState.currentWave === 10 || gameState.currentWave === 20);
+
+        if (!isBossWave) {
+            gameState.waveTimer -= dt();
+            waveText.text = `WAVE: ${gameState.currentWave} (Time: ${Math.max(0, Math.ceil(gameState.waveTimer))}s)`;
+
+            // Wave completion when 60s timer expires
+            if (gameState.waveTimer <= 0) {
+                get("enemy").forEach(e => destroy(e));
+                startShopPhase();
+                return;
+            }
+        } else {
+            const bossCount = get("boss").length;
+            if (bossCount > 0) {
+                waveText.text = `WAVE: ${gameState.currentWave} (DEFEAT THE BOSS!)`;
+            } else {
+                if (gameState.waveTimer <= 0 && bossCount === 0) {
+                    startShopPhase();
+                    return;
+                }
+            }
+        }
+
+        // Make all enemies move continuously toward the player
+        get("enemy").forEach((e) => {
+            const dir = player.pos.sub(e.pos).unit();
+            e.move(dir.scale(e.speed));
+
+            // Mini-Boss Shooting Logic (Slow Projectiles)
+            if (e.isMiniBoss) {
+                e.bossAttackTimer = (e.bossAttackTimer || 0) + dt();
+                if (e.bossAttackTimer >= 2.5) {
+                    playSound('shoot');
+                    add([
+                        circle(10),
+                        color(239, 68, 68),
+                        outline(2, rgb(255, 255, 255)),
+                        pos(e.pos),
+                        area(),
+                        move(dir, 160),
+                        anchor("center"),
+                        "enemy_bullet",
+                        { damage: 15 }
+                    ]);
+                    e.bossAttackTimer = 0;
+                }
+            }
+
+            // Final Boss Shooting Logic
+            if (e.isFinalBoss) {
+                e.bossAttackTimer = (e.bossAttackTimer || 0) + dt();
+                if (e.bossAttackTimer >= 1.5) {
+                    playSound('shoot');
+                    for (let i = -1; i <= 1; i++) {
+                        const spreadAngle = i * 0.2;
+                        const bulletDir = vec2(
+                            dir.x * Math.cos(spreadAngle) - dir.y * Math.sin(spreadAngle),
+                            dir.x * Math.sin(spreadAngle) + dir.y * Math.cos(spreadAngle)
+                        );
+                        add([
+                            circle(8),
+                            color(168, 85, 247),
+                            outline(2, rgb(248, 250, 252)),
+                            pos(e.pos),
+                            area(),
+                            move(bulletDir, 400),
+                            anchor("center"),
+                            "enemy_bullet",
+                            { damage: 20 }
+                        ]);
+                    }
+                    e.bossAttackTimer = 0;
+                }
+            }
+        });
+
         spawnTimer += dt();
-        let currentSpawnInterval = Math.max(0.2, 0.9 - (gameState.level * 0.06));
+        // Slower spawn interval during boss waves so it's not overwhelming
+        let currentSpawnInterval = isBossWave ? 1.2 : Math.max(0.18, 0.8 - (gameState.currentWave * 0.03));
 
         if (spawnTimer >= currentSpawnInterval) {
             const angle = rand(0, Math.PI * 2);
@@ -462,85 +726,118 @@ scene("main", () => {
             const spawnPos = player.pos.add(vec2(Math.cos(angle) * distance, Math.sin(angle) * distance));
 
             if (spawnPos.x >= -4900 && spawnPos.x <= 4900 && spawnPos.y >= -4900 && spawnPos.y <= 4900) {
-                add([
-                    sprite("spudling"),
-                    pos(spawnPos),
-                    area(),
-                    body(),
-                    anchor("center"),
-                    scale(1.0),
-                    "enemy",
-                    { 
-                        hp: 2 + Math.floor(gameState.level * 0.7), 
-                        speed: rand(110, 160 + (gameState.level * 3)),
-                        isRanged: true,
-                        attackTimer: rand(0, 2)
-                    }
-                ]);
+                const baseEnemyHp = 2 + Math.floor(gameState.currentWave * 1.2);
+                
+                // Wave 10 Mini-Boss Spawn Logic (Exactly 1 mini-boss)
+                if (gameState.currentWave === 10 && get("boss").length === 0) {
+                    add([
+                        sprite("miniboss"),
+                        pos(spawnPos),
+                        area(),
+                        body(),
+                        anchor("center"),
+                        scale(0.45),
+                        "enemy",
+                        "boss",
+                        { 
+                            hp: baseEnemyHp * 8, 
+                            speed: 90,
+                            isMiniBoss: true,
+                            name: "Mini Boss Warlord"
+                        }
+                    ]);
+                    gameState.waveTimer = -1; 
+                } 
+                // Wave 20 Final Boss Spawn Logic (Exactly 1 final boss)
+                else if (gameState.currentWave === 20 && get("boss").length === 0) {
+                    add([
+                        sprite("finalboss"),
+                        pos(spawnPos),
+                        area(),
+                        body(),
+                        anchor("center"),
+                        scale(0.55),
+                        "enemy",
+                        "boss",
+                        { 
+                            hp: baseEnemyHp * 15, 
+                            speed: 120,
+                            isFinalBoss: true,
+                            name: "Final Boss Leviathan"
+                        }
+                    ]);
+                    gameState.waveTimer = -1; 
+                }
+
+                // Regular Spudling minion spawns (reduced count during boss waves)
+                if (!isBossWave || Math.random() < 0.6) {
+                    add([
+                        sprite("spudling"),
+                        pos(spawnPos),
+                        area(),
+                        body(),
+                        anchor("center"),
+                        scale(0.75),
+                        "enemy",
+                        { 
+                            hp: baseEnemyHp, 
+                            speed: rand(110, 140 + (gameState.currentWave * 3)),
+                        }
+                    ]);
+                }
             }
             spawnTimer = 0;
         }
     });
 
-    onUpdate("enemy", (enemy) => {
-        if (gameState.isPaused) return;
-        if (enemy.pos.dist(player.pos) > 1800) {
-            destroy(enemy);
-            return;
-        }
-
-        const dir = player.pos.sub(enemy.pos).unit();
-        let speedMultiplier = gameState.activeMythics.includes("Time Dilation") ? 0.7 : 1.0;
-
-        // Enemy rushes directly toward player for physical contact
-        enemy.move(dir.scale(enemy.speed * speedMultiplier));
-    });
-
-    onUpdate("gem", (gem) => {
-        if (gameState.isPaused) return;
-        if (gem.pos.dist(player.pos) < gameState.magnetRadius) {
-            const gemDir = player.pos.sub(gem.pos).unit();
-            gem.move(gemDir.scale(400));
+    // Enemy Projectile Collision with Player
+    player.onCollide("enemy_bullet", (b) => {
+        if (gameState.isPaused || gameState.godMode || invulnerableTimer > 0) return;
+        destroy(b);
+        gameState.hp -= b.damage || 15;
+        playSound('hurt');
+        hpText.text = `HP: ${Math.max(0, Math.ceil(gameState.hp))}/${gameState.maxHp}`;
+        if (gameState.hp <= 0) {
+            cheatOverlay.remove();
+            go("gameover", { kills: gameState.kills, level: gameState.level });
         }
     });
 
-    player.onCollide("gem", (gem) => {
-        if (gameState.isPaused) return;
-        destroy(gem);
-        playSound('gem');
-        gameState.xp += (gem.value || 1);
-
-        if (gameState.xp >= gameState.xpToNextLevel) {
-            gameState.level++;
-            gameState.xp -= gameState.xpToNextLevel;
-            gameState.xpToNextLevel = Math.floor(gameState.xpToNextLevel * 1.5);
-            showUpgradeMenu();
-        }
-
-        levelText.text = `LVL: ${gameState.level} (XP: ${gameState.xp}/${gameState.xpToNextLevel})`;
-    });
-
-    function showUpgradeMenu() {
+    function startShopPhase() {
+        gameState.isWaveActive = false;
         gameState.isPaused = true;
-        playSound('levelup');
+        
+        // Restore Player to Full HP at the end of each wave
+        gameState.hp = gameState.maxHp;
+        hpText.text = `HP: ${Math.ceil(gameState.hp)}/${gameState.maxHp}`;
 
-        const menuOverlay = add([
+        playSound('mythic');
+
+        const shopOverlay = add([
             rect(1280, 720),
             color(15, 23, 42),
-            opacity(0.92),
+            opacity(0.95),
             fixed(),
             z(200),
+            area(),
         ]);
 
-        menuOverlay.add([
-            text(`LEVEL UP! (LEVEL ${gameState.level})`, { size: 42 }),
-            pos(center().x, 80),
+        shopOverlay.add([
+            text(`WAVE ${gameState.currentWave} COMPLETED!`, { size: 36 }),
+            pos(center().x, 50),
+            anchor("center"),
+            color(52, 211, 153),
+        ]);
+
+        const goldDisplay = shopOverlay.add([
+            text(`Vanguard Supply Shop | Your Gold: $${gameState.gold}`, { size: 22 }),
+            pos(center().x, 90),
             anchor("center"),
             color(251, 191, 36),
         ]);
 
         const fullPool = [...upgradePool, ...uniqueAbilitiesPool, ...mythicPool];
-        const cardOptions = [];
+        const shopOptions = [];
 
         for (let i = 0; i < 3; i++) {
             const totalWeight = fullPool.reduce((acc, card) => acc + card.weight, 0);
@@ -554,66 +851,72 @@ scene("main", () => {
                 }
                 randomVal -= card.weight;
             }
-            cardOptions.push(selected);
+
+            // Assign standard shop costs based on rarity tier
+            let price = 1;
+            if (selected.rarity === "Mythic") price = 20;
+            else if (selected.rarity === "Legendary") price = 15;
+            else if (selected.rarity === "Rare" || selected.rarity === "Unique Ability") price = 5;
+            else price = 1;
+
+            shopOptions.push({ ...selected, price });
         }
 
-        cardOptions.forEach((option, idx) => {
+        shopOptions.forEach((option, idx) => {
             const cardX = center().x + (idx - 1) * 360;
             const cardY = center().y + 30;
 
-            let stackCount = gameState.mythicStacks[option.name] || 0;
-            let displayTitle = option.name;
-            if (option.rarity === "Mythic" && stackCount > 0) {
-                displayTitle += ` (x${stackCount + 1})`;
-            }
-
-            const card = menuOverlay.add([
-                rect(320, 380, { radius: 12 }),
+            const card = shopOverlay.add([
+                rect(320, 350, { radius: 12 }),
                 pos(cardX, cardY),
                 anchor("center"),
                 color(30, 41, 59),
                 outline(4, option.color),
                 area(),
-                "card",
             ]);
 
             card.add([
                 text(option.rarity.toUpperCase(), { size: 16 }),
-                pos(0, -140),
+                pos(0, -130),
                 anchor("center"),
                 color(option.color),
             ]);
 
             card.add([
-                text(displayTitle, { size: 20, width: 280, align: "center" }),
+                text(option.name, { size: 18, width: 280, align: "center" }),
                 pos(0, -90),
                 anchor("center"),
                 color(255, 255, 255),
             ]);
 
             card.add([
-                text(option.desc, { size: 16, width: 260, align: "center" }),
-                pos(0, 10),
+                text(option.desc, { size: 15, width: 260, align: "center" }),
+                pos(0, -10),
                 anchor("center"),
                 color(203, 213, 225),
             ]);
 
             const chooseBtn = card.add([
-                rect(200, 48, { radius: 8 }),
-                pos(0, 120),
+                rect(240, 48, { radius: 8 }),
+                pos(0, 110),
                 anchor("center"),
-                color(option.color),
-                area(),
+                color(gameState.gold >= option.price ? option.color : rgb(71, 85, 105)),
             ]);
 
-            chooseBtn.add([
-                text("SELECT", { size: 18 }),
+            const btnText = chooseBtn.add([
+                text(`BUY FOR $${option.price}`, { size: 15 }),
                 pos(0, 0),
                 anchor("center"),
                 color(15, 23, 42),
             ]);
 
-            chooseBtn.onClick(() => {
+            card.onClick(() => {
+                if (gameState.gold < option.price) return;
+
+                gameState.gold -= option.price;
+                goldDisplay.text = `Vanguard Supply Shop | Your Gold: $${gameState.gold}`;
+                killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold}`;
+
                 option.apply();
 
                 if (option.rarity === "Mythic") {
@@ -630,9 +933,37 @@ scene("main", () => {
                 }
 
                 updateTraitsDisplay();
-                destroy(menuOverlay);
-                gameState.isPaused = false;
+                chooseBtn.color = rgb(34, 197, 94);
+                btnText.text = "PURCHASED!";
             });
+        });
+
+        // Continue Next Wave Button
+        const nextWaveBtn = shopOverlay.add([
+            rect(280, 50, { radius: 8 }),
+            pos(center().x, 320),
+            anchor("center"),
+            color(52, 211, 153),
+            area(),
+        ]);
+
+        nextWaveBtn.add([
+            text("START NEXT WAVE ➔", { size: 18 }),
+            pos(0, 0),
+            anchor("center"),
+            color(15, 23, 42),
+        ]);
+
+        nextWaveBtn.onClick(() => {
+            destroy(shopOverlay);
+
+            // Prepare next wave with full 60 seconds
+            gameState.currentWave++;
+            gameState.waveTimer = 60;
+            waveText.text = `WAVE: ${gameState.currentWave} (Time: 60s)`;
+
+            gameState.isPaused = false;
+            gameState.isWaveActive = true;
         });
     }
 
@@ -748,31 +1079,13 @@ scene("main", () => {
         }
 
         if (enemy.hp <= 0) {
-            if (gameState.activeMythics.includes("☣️ Plague Spore Aura")) {
-                let stacks = gameState.mythicStacks["☣️ Plague Spore Aura"] || 1;
-                const toxicPos = enemy.pos;
-                const cloud = add([
-                    circle(50 + stacks * 15),
-                    color(34, 197, 94),
-                    opacity(0.6),
-                    pos(toxicPos),
-                    anchor("center"),
-                    z(30)
-                ]);
-                wait(0.3, () => destroy(cloud));
-
-                get("enemy").forEach(nearEnemy => {
-                    if (nearEnemy !== enemy && nearEnemy.pos.dist(toxicPos) < 50 + stacks * 15) {
-                        nearEnemy.hp -= (4 * stacks);
-                    }
-                });
-            }
-
             let gemValue = 1 + Math.floor(gameState.level * 0.3);
             if (gameState.activeMythics.includes("🧲 Quantum Gravity Well")) {
                 let stacks = gameState.mythicStacks["🧲 Quantum Gravity Well"] || 1;
                 gemValue = Math.floor(gemValue * (1.5 + stacks * 0.5));
             }
+
+            gameState.gold += gemValue;
 
             add([
                 circle(6 + Math.min(6, gemValue)),
@@ -787,7 +1100,7 @@ scene("main", () => {
 
             destroy(enemy);
             gameState.kills++;
-            killText.text = `KILLS: ${gameState.kills}`;
+            killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold}`;
 
             if (gameState.activeAbilities.includes("Vampiric Siphon") && gameState.kills % 5 === 0) {
                 gameState.hp = Math.min(gameState.maxHp, gameState.hp + 1);
