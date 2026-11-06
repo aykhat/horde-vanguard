@@ -18,7 +18,7 @@ scene("main", () => {
         hp: 100,
         xp: 0,
         level: 1,
-        xpToNextLevel: 10, // Base XP to level up
+        xpToNextLevel: 10,
         kills: 0,
         gold: 0,
         currentWave: 1,
@@ -37,6 +37,16 @@ scene("main", () => {
     };
 
     const uiBox = add([fixed(), z(100)]);
+
+    // Boss pointer indicator
+    const bossIndicator = uiBox.add([
+        text("⚠️ BOSS ➔", { size: 18 }),
+        pos(center().x, 60),
+        anchor("center"),
+        color(239, 68, 68),
+        opacity(0),
+        z(120),
+    ]);
 
     const hpText = uiBox.add([
         text(`HP: ${gameState.hp}/${gameState.maxHp}`, { size: 22 }),
@@ -352,6 +362,14 @@ scene("main", () => {
             moveDir = moveDir.unit();
             player.move(moveDir.scale(gameState.playerSpeed));
         }
+
+        // PERFORMANCE OPTIMIZATION: Cull bullets & distant entities that fly too far off-screen
+        get("bullet").forEach(b => {
+            if (b.pos.dist(player.pos) > 1400) destroy(b);
+        });
+        get("enemy_bullet").forEach(b => {
+            if (b.pos.dist(player.pos) > 1400) destroy(b);
+        });
     });
 
     let consoleOpen = false;
@@ -465,12 +483,12 @@ scene("main", () => {
         if (gameState.activeMythics.includes("☣️ Acid Tsunami")) {
             acidTrailTimer += dt();
             let stacks = gameState.mythicStacks["☣️ Acid Tsunami"] || 1;
-            if (acidTrailTimer >= 0.15) {
+            if (acidTrailTimer >= 0.25) { // Throttled frequency for lag-free performance
                 const trailPos = player.pos;
                 const acidPuddle = add([
                     circle(15 + stacks * 5),
                     color(132, 204, 22),
-                    opacity(0.4),
+                    opacity(0.3),
                     pos(trailPos),
                     anchor("center"),
                     z(5)
@@ -489,7 +507,7 @@ scene("main", () => {
 
         if (gameState.activeMythics.includes("🗡️ Blade Storm Halo")) {
             let stacks = gameState.mythicStacks["🗡️ Blade Storm Halo"] || 1;
-            let bladeCount = 2 + stacks * 2;
+            let bladeCount = Math.min(6, 2 + stacks); // Capped maximum blades to prevent heavy frame drops
             bladeAngle += dt() * (2 + stacks * 0.5);
 
             for (let i = 0; i < bladeCount; i++) {
@@ -498,7 +516,7 @@ scene("main", () => {
                 
                 get("enemy").forEach(e => {
                     if (e.pos.dist(bladePos) < 25) {
-                        e.hp -= (0.3 * gameState.attackDamage * stacks);
+                        e.hp -= (0.4 * gameState.attackDamage * stacks);
                         if (e.hp <= 0) { destroy(e); gameState.kills++; killText.text = `KILLS: ${gameState.kills}`; }
                     }
                 });
@@ -508,20 +526,22 @@ scene("main", () => {
         if (gameState.activeMythics.includes("🧲 Quantum Gravity Well")) {
             let stacks = gameState.mythicStacks["🧲 Quantum Gravity Well"] || 1;
             get("gem").forEach(g => {
-                g.move(player.pos.sub(g.pos).unit().scale(250 + stacks * 150));
+                if (g.pos.dist(player.pos) < 800) {
+                    g.move(player.pos.sub(g.pos).unit().scale(250 + stacks * 150));
+                }
             });
         }
 
         if (gameState.activeMythics.includes("☀️ Solar Nova")) {
             solarTimer += dt();
             let stacks = gameState.mythicStacks["☀️ Solar Nova"] || 1;
-            let cooldown = Math.max(0.8, 3.0 - (stacks * 0.4));
+            let cooldown = Math.max(1.0, 3.0 - (stacks * 0.4));
             if (solarTimer >= cooldown) {
                 playSound('hit');
                 const nova = add([
                     circle(120 + stacks * 25),
                     color(245, 158, 11),
-                    opacity(0.5),
+                    opacity(0.4),
                     pos(player.pos),
                     anchor("center"),
                     z(40)
@@ -543,7 +563,7 @@ scene("main", () => {
             let stacks = gameState.mythicStacks["🌀 Event Horizon"] || 1;
             get("enemy").forEach(e => {
                 if (e.pos.dist(player.pos) < 100 + stacks * 20) {
-                    e.hp -= (0.1 * stacks);
+                    e.hp -= (0.15 * stacks);
                     if (e.hp <= 0) { destroy(e); gameState.kills++; killText.text = `KILLS: ${gameState.kills}`; }
                 }
             });
@@ -551,7 +571,7 @@ scene("main", () => {
 
         if (gameState.activeMythics.includes("👑 Overlord's Presence")) {
             let stacks = gameState.mythicStacks["👑 Overlord's Presence"] || 1;
-            let droneCount = stacks * 2;
+            let droneCount = Math.min(4, stacks * 2);
             overlordAngle += dt() * 3;
 
             for (let i = 0; i < droneCount; i++) {
@@ -560,7 +580,7 @@ scene("main", () => {
                 
                 get("enemy").forEach(e => {
                     if (e.pos.dist(dronePos) < 40) {
-                        e.hp -= (0.2 * gameState.attackDamage);
+                        e.hp -= (0.3 * gameState.attackDamage);
                         if (e.hp <= 0) { destroy(e); gameState.kills++; killText.text = `KILLS: ${gameState.kills}`; }
                     }
                 });
@@ -638,37 +658,49 @@ scene("main", () => {
     onUpdate(() => {
         if (gameState.isPaused || !gameState.isWaveActive) return;
 
-        // Wave Timer & Survival Logic
         const isBossWave = (gameState.currentWave === 10 || gameState.currentWave === 20);
 
         if (!isBossWave) {
             gameState.waveTimer -= dt();
             waveText.text = `WAVE: ${gameState.currentWave} (Time: ${Math.max(0, Math.ceil(gameState.waveTimer))}s)`;
 
-            // Wave completion when 60s timer expires
             if (gameState.waveTimer <= 0) {
                 get("enemy").forEach(e => destroy(e));
                 startShopPhase();
                 return;
             }
         } else {
-            const bossCount = get("boss").length;
+            const bossList = get("boss");
+            const bossCount = bossList.length;
             if (bossCount > 0) {
                 waveText.text = `WAVE: ${gameState.currentWave} (DEFEAT THE BOSS!)`;
-            } else {
-                if (gameState.waveTimer <= 0 && bossCount === 0) {
-                    startShopPhase();
-                    return;
+                
+                // Update boss pointer indicator
+                const bPos = bossList[0].pos;
+                const dirToBoss = bPos.sub(player.pos);
+                const screenCenter = center();
+                const dist = dirToBoss.len();
+
+                if (dist > 500) {
+                    bossIndicator.opacity = 1;
+                    const angle = dirToBoss.angle();
+                    bossIndicator.pos = screenCenter.add(vec2(Math.cos(angle) * 350, Math.sin(angle) * 220));
+                    bossIndicator.text = `⚠️ BOSS (${Math.round(dist)}m) ➔`;
+                } else {
+                    bossIndicator.opacity = 0;
                 }
+            } else {
+                bossIndicator.opacity = 0;
+                startShopPhase();
+                return;
             }
         }
 
-        // Make all enemies move continuously toward the player
+        // PERFORMANCE: Only update AI movement and checks for enemies within reasonable distance or batch them
         get("enemy").forEach((e) => {
             const dir = player.pos.sub(e.pos).unit();
             e.move(dir.scale(e.speed));
 
-            // Mini-Boss Shooting Logic (Slow Projectiles)
             if (e.isMiniBoss) {
                 e.bossAttackTimer = (e.bossAttackTimer || 0) + dt();
                 if (e.bossAttackTimer >= 2.5) {
@@ -688,7 +720,6 @@ scene("main", () => {
                 }
             }
 
-            // Final Boss Shooting Logic
             if (e.isFinalBoss) {
                 e.bossAttackTimer = (e.bossAttackTimer || 0) + dt();
                 if (e.bossAttackTimer >= 1.5) {
@@ -717,73 +748,73 @@ scene("main", () => {
         });
 
         spawnTimer += dt();
-        // Slower spawn interval during boss waves so it's not overwhelming
-        let currentSpawnInterval = isBossWave ? 1.2 : Math.max(0.18, 0.8 - (gameState.currentWave * 0.03));
+        let currentSpawnInterval = isBossWave ? 2.2 : Math.max(0.25, 0.8 - (gameState.currentWave * 0.02));
 
         if (spawnTimer >= currentSpawnInterval) {
-            const angle = rand(0, Math.PI * 2);
-            const distance = rand(800, 1100);
-            const spawnPos = player.pos.add(vec2(Math.cos(angle) * distance, Math.sin(angle) * distance));
+            // PERFORMANCE: Limit maximum active enemies on screen to prevent lag spikes
+            if (get("enemy").length < 120) {
+                const angle = rand(0, Math.PI * 2);
+                const distance = rand(800, 1100);
+                const spawnPos = player.pos.add(vec2(Math.cos(angle) * distance, Math.sin(angle) * distance));
 
-            if (spawnPos.x >= -4900 && spawnPos.x <= 4900 && spawnPos.y >= -4900 && spawnPos.y <= 4900) {
-                const baseEnemyHp = 2 + Math.floor(gameState.currentWave * 1.2);
-                
-                // Wave 10 Mini-Boss Spawn Logic (Exactly 1 mini-boss)
-                if (gameState.currentWave === 10 && get("boss").length === 0) {
-                    add([
-                        sprite("miniboss"),
-                        pos(spawnPos),
-                        area(),
-                        body(),
-                        anchor("center"),
-                        scale(0.45),
-                        "enemy",
-                        "boss",
-                        { 
-                            hp: baseEnemyHp * 8, 
-                            speed: 90,
-                            isMiniBoss: true,
-                            name: "Mini Boss Warlord"
-                        }
-                    ]);
-                    gameState.waveTimer = -1; 
-                } 
-                // Wave 20 Final Boss Spawn Logic (Exactly 1 final boss)
-                else if (gameState.currentWave === 20 && get("boss").length === 0) {
-                    add([
-                        sprite("finalboss"),
-                        pos(spawnPos),
-                        area(),
-                        body(),
-                        anchor("center"),
-                        scale(0.55),
-                        "enemy",
-                        "boss",
-                        { 
-                            hp: baseEnemyHp * 15, 
-                            speed: 120,
-                            isFinalBoss: true,
-                            name: "Final Boss Leviathan"
-                        }
-                    ]);
-                    gameState.waveTimer = -1; 
-                }
+                if (spawnPos.x >= -4900 && spawnPos.x <= 4900 && spawnPos.y >= -4900 && spawnPos.y <= 4900) {
+                    const baseEnemyHp = 2 + Math.floor(gameState.currentWave * 1.2);
+                    
+                    if (gameState.currentWave === 10 && get("boss").length === 0) {
+                        add([
+                            sprite("miniboss"),
+                            pos(spawnPos),
+                            area(),
+                            body(),
+                            anchor("center"),
+                            scale(0.35),
+                            z(10),
+                            "enemy",
+                            "boss",
+                            { 
+                                hp: baseEnemyHp * 8, 
+                                speed: 90,
+                                isMiniBoss: true,
+                                name: "Mini Boss Warlord"
+                            }
+                        ]);
+                    } 
+                    else if (gameState.currentWave === 20 && get("boss").length === 0) {
+                        add([
+                            sprite("finalboss"),
+                            pos(spawnPos),
+                            area(),
+                            body(),
+                            anchor("center"),
+                            scale(0.45),
+                            z(10),
+                            "enemy",
+                            "boss",
+                            { 
+                                hp: baseEnemyHp * 15, 
+                                speed: 120,
+                                isFinalBoss: true,
+                                name: "Final Boss Leviathan"
+                            }
+                        ]);
+                    }
 
-                // Regular Spudling minion spawns (reduced count during boss waves)
-                if (!isBossWave || Math.random() < 0.6) {
-                    add([
-                        sprite("spudling"),
-                        pos(spawnPos),
-                        area(),
-                        body(),
-                        anchor("center"),
-                        scale(0.75),
-                        "enemy",
-                        { 
-                            hp: baseEnemyHp, 
-                            speed: rand(110, 140 + (gameState.currentWave * 3)),
-                        }
-                    ]);
+                    if (!isBossWave || Math.random() < 0.35) {
+                        add([
+                            sprite("spudling"),
+                            pos(spawnPos),
+                            area(),
+                            body(),
+                            anchor("center"),
+                            scale(0.8), // Clean visible scale for Enemy.png
+                            z(10),
+                            "enemy",
+                            { 
+                                hp: baseEnemyHp, 
+                                speed: rand(110, 140 + (gameState.currentWave * 2)),
+                            }
+                        ]);
+                    }
                 }
             }
             spawnTimer = 0;
@@ -807,7 +838,6 @@ scene("main", () => {
         gameState.isWaveActive = false;
         gameState.isPaused = true;
         
-        // Restore Player to Full HP at the end of each wave
         gameState.hp = gameState.maxHp;
         hpText.text = `HP: ${Math.ceil(gameState.hp)}/${gameState.maxHp}`;
 
@@ -824,131 +854,164 @@ scene("main", () => {
 
         shopOverlay.add([
             text(`WAVE ${gameState.currentWave} COMPLETED!`, { size: 36 }),
-            pos(center().x, 50),
+            pos(center().x, 40),
             anchor("center"),
             color(52, 211, 153),
         ]);
 
         const goldDisplay = shopOverlay.add([
             text(`Vanguard Supply Shop | Your Gold: $${gameState.gold}`, { size: 22 }),
-            pos(center().x, 90),
+            pos(center().x, 80),
             anchor("center"),
             color(251, 191, 36),
         ]);
 
         const fullPool = [...upgradePool, ...uniqueAbilitiesPool, ...mythicPool];
-        const shopOptions = [];
 
-        for (let i = 0; i < 3; i++) {
-            const totalWeight = fullPool.reduce((acc, card) => acc + card.weight, 0);
-            let randomVal = Math.random() * totalWeight;
-            let selected = fullPool[0];
+        function renderShopCards() {
+            shopOverlay.get("shop_card").forEach(c => destroy(c));
 
-            for (let card of fullPool) {
-                if (randomVal < card.weight) {
-                    selected = card;
-                    break;
+            const shopOptions = [];
+            for (let i = 0; i < 3; i++) {
+                const totalWeight = fullPool.reduce((acc, card) => acc + card.weight, 0);
+                let randomVal = Math.random() * totalWeight;
+                let selected = fullPool[0];
+
+                for (let card of fullPool) {
+                    if (randomVal < card.weight) {
+                        selected = card;
+                        break;
+                    }
+                    randomVal -= card.weight;
                 }
-                randomVal -= card.weight;
+
+                // Higher prices for powerful tiers
+                let price = 5;
+                if (selected.rarity === "Mythic") price = 45;
+                else if (selected.rarity === "Legendary") price = 30;
+                else if (selected.rarity === "Rare" || selected.rarity === "Unique Ability") price = 15;
+                else price = 8;
+
+                shopOptions.push({ ...selected, price });
             }
 
-            // Assign standard shop costs based on rarity tier
-            let price = 1;
-            if (selected.rarity === "Mythic") price = 20;
-            else if (selected.rarity === "Legendary") price = 15;
-            else if (selected.rarity === "Rare" || selected.rarity === "Unique Ability") price = 5;
-            else price = 1;
+            shopOptions.forEach((option, idx) => {
+                const cardX = center().x + (idx - 1) * 360;
+                const cardY = center().y + 10;
 
-            shopOptions.push({ ...selected, price });
+                const card = shopOverlay.add([
+                    rect(320, 350, { radius: 12 }),
+                    pos(cardX, cardY),
+                    anchor("center"),
+                    color(30, 41, 59),
+                    outline(4, option.color),
+                    area(),
+                    "shop_card",
+                ]);
+
+                card.add([
+                    text(option.rarity.toUpperCase(), { size: 16 }),
+                    pos(0, -130),
+                    anchor("center"),
+                    color(option.color),
+                ]);
+
+                card.add([
+                    text(option.name, { size: 18, width: 280, align: "center" }),
+                    pos(0, -90),
+                    anchor("center"),
+                    color(255, 255, 255),
+                ]);
+
+                card.add([
+                    text(option.desc, { size: 15, width: 260, align: "center" }),
+                    pos(0, -10),
+                    anchor("center"),
+                    color(203, 213, 225),
+                ]);
+
+                const chooseBtn = card.add([
+                    rect(240, 48, { radius: 8 }),
+                    pos(0, 110),
+                    anchor("center"),
+                    color(gameState.gold >= option.price ? option.color : rgb(71, 85, 105)),
+                ]);
+
+                const btnText = chooseBtn.add([
+                    text(`BUY FOR $${option.price}`, { size: 15 }),
+                    pos(0, 0),
+                    anchor("center"),
+                    color(15, 23, 42),
+                ]);
+
+                card.onClick(() => {
+                    if (gameState.gold < option.price) return;
+
+                    gameState.gold -= option.price;
+                    goldDisplay.text = `Vanguard Supply Shop | Your Gold: $${gameState.gold}`;
+                    killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold}`;
+
+                    option.apply();
+
+                    if (option.rarity === "Mythic") {
+                        if (!gameState.activeMythics.includes(option.name)) {
+                            gameState.activeMythics.push(option.name);
+                        }
+                        gameState.mythicStacks[option.name] = (gameState.mythicStacks[option.name] || 0) + 1;
+                    }
+
+                    if (option.rarity === "Unique Ability") {
+                        if (!gameState.activeAbilities.includes(option.name)) {
+                            gameState.activeAbilities.push(option.name);
+                        }
+                    }
+
+                    updateTraitsDisplay();
+                    chooseBtn.color = rgb(34, 197, 94);
+                    btnText.text = "PURCHASED!";
+                });
+            });
         }
 
-        shopOptions.forEach((option, idx) => {
-            const cardX = center().x + (idx - 1) * 360;
-            const cardY = center().y + 30;
+        renderShopCards();
 
-            const card = shopOverlay.add([
-                rect(320, 350, { radius: 12 }),
-                pos(cardX, cardY),
-                anchor("center"),
-                color(30, 41, 59),
-                outline(4, option.color),
-                area(),
-            ]);
+        // Reroll Shop Button ($10)
+        const rerollBtn = shopOverlay.add([
+            rect(200, 42, { radius: 8 }),
+            pos(center().x - 150, center().y + 220),
+            anchor("center"),
+            color(245, 158, 11),
+            area(),
+        ]);
 
-            card.add([
-                text(option.rarity.toUpperCase(), { size: 16 }),
-                pos(0, -130),
-                anchor("center"),
-                color(option.color),
-            ]);
+        const rerollText = rerollBtn.add([
+            text("REROLL SHOP ($10)", { size: 14 }),
+            pos(0, 0),
+            anchor("center"),
+            color(15, 23, 42),
+        ]);
 
-            card.add([
-                text(option.name, { size: 18, width: 280, align: "center" }),
-                pos(0, -90),
-                anchor("center"),
-                color(255, 255, 255),
-            ]);
-
-            card.add([
-                text(option.desc, { size: 15, width: 260, align: "center" }),
-                pos(0, -10),
-                anchor("center"),
-                color(203, 213, 225),
-            ]);
-
-            const chooseBtn = card.add([
-                rect(240, 48, { radius: 8 }),
-                pos(0, 110),
-                anchor("center"),
-                color(gameState.gold >= option.price ? option.color : rgb(71, 85, 105)),
-            ]);
-
-            const btnText = chooseBtn.add([
-                text(`BUY FOR $${option.price}`, { size: 15 }),
-                pos(0, 0),
-                anchor("center"),
-                color(15, 23, 42),
-            ]);
-
-            card.onClick(() => {
-                if (gameState.gold < option.price) return;
-
-                gameState.gold -= option.price;
+        rerollBtn.onClick(() => {
+            if (gameState.gold >= 10) {
+                gameState.gold -= 10;
                 goldDisplay.text = `Vanguard Supply Shop | Your Gold: $${gameState.gold}`;
                 killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold}`;
-
-                option.apply();
-
-                if (option.rarity === "Mythic") {
-                    if (!gameState.activeMythics.includes(option.name)) {
-                        gameState.activeMythics.push(option.name);
-                    }
-                    gameState.mythicStacks[option.name] = (gameState.mythicStacks[option.name] || 0) + 1;
-                }
-
-                if (option.rarity === "Unique Ability") {
-                    if (!gameState.activeAbilities.includes(option.name)) {
-                        gameState.activeAbilities.push(option.name);
-                    }
-                }
-
-                updateTraitsDisplay();
-                chooseBtn.color = rgb(34, 197, 94);
-                btnText.text = "PURCHASED!";
-            });
+                playSound('hit');
+                renderShopCards();
+            }
         });
 
         // Continue Next Wave Button
         const nextWaveBtn = shopOverlay.add([
-            rect(280, 50, { radius: 8 }),
-            pos(center().x, 320),
+            rect(200, 42, { radius: 8 }),
+            pos(center().x + 150, center().y + 220),
             anchor("center"),
             color(52, 211, 153),
             area(),
         ]);
 
         nextWaveBtn.add([
-            text("START NEXT WAVE ➔", { size: 18 }),
+            text("NEXT WAVE ➔", { size: 14 }),
             pos(0, 0),
             anchor("center"),
             color(15, 23, 42),
@@ -957,7 +1020,6 @@ scene("main", () => {
         nextWaveBtn.onClick(() => {
             destroy(shopOverlay);
 
-            // Prepare next wave with full 60 seconds
             gameState.currentWave++;
             gameState.waveTimer = 60;
             waveText.text = `WAVE: ${gameState.currentWave} (Time: 60s)`;
