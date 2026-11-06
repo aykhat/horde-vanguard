@@ -19,14 +19,14 @@ scene("main", () => {
         hp: 100,
         xp: 0,
         level: 1,
-        xpToNextLevel: 18, // Increased initial XP requirement for balanced progression
+        xpToNextLevel: 18,
         kills: 0,
         gold: 15,
         totalGoldSpent: 0,
         totalDamageDealt: 0,
         totalDamageTaken: 0,
         currentWave: 1,
-        waveTimer: 35, // 35s wave timer
+        waveTimer: 35,
         isWaveActive: true,
         playerSpeed: 240,
         magnetRadius: 150,
@@ -94,6 +94,38 @@ scene("main", () => {
         anchor("center"),
         color(239, 68, 68),
         opacity(0),
+    ]);
+
+    // Boss HP Bar UI (Only visible when Mini-Boss or Final Boss is alive)
+    const bossHpContainer = uiBox.add([
+        pos(center().x, 100),
+        fixed(),
+        z(150),
+        opacity(0),
+        "boss_hp_ui"
+    ]);
+    bossHpContainer.hidden = true;
+
+    const bossHpBg = bossHpContainer.add([
+        rect(400, 22, { radius: 6 }),
+        anchor("center"),
+        color(30, 41, 59),
+        outline(2, rgb(239, 68, 68)),
+    ]);
+
+    // Set anchor to top-right corner so it strictly depletes RIGHT -> LEFT
+    const bossHpFill = bossHpContainer.add([
+        rect(396, 18, { radius: 4 }),
+        anchor("topright"),
+        pos(198, -9),
+        color(239, 68, 68),
+    ]);
+
+    const bossHpLabel = bossHpContainer.add([
+        text("", { size: 14 }),
+        pos(0, -22),
+        anchor("center"),
+        color(255, 255, 255),
     ]);
 
     const traitsContainer = uiBox.add([pos(30, 168)]);
@@ -207,7 +239,7 @@ scene("main", () => {
         if (gameState.xp >= gameState.xpToNextLevel) {
             gameState.level++;
             gameState.xp -= gameState.xpToNextLevel;
-            gameState.xpToNextLevel = Math.floor(gameState.xpToNextLevel * 1.65); // Slower XP scaling
+            gameState.xpToNextLevel = Math.floor(gameState.xpToNextLevel * 1.65);
             playSound('levelup');
             showLevelUpMenu();
         }
@@ -442,6 +474,8 @@ scene("main", () => {
             gameState.waveTimer -= dt();
             waveText.text = `WAVE: ${gameState.currentWave} (Time: ${Math.max(0, Math.ceil(gameState.waveTimer))}s)`;
             bossIndicator.opacity = 0;
+            bossHpContainer.opacity = 0; // Explicitly ensure boss HP bar is hidden on regular waves
+            bossHpContainer.hidden = true;
 
             if (gameState.waveTimer <= 0) {
                 get("enemy").forEach(e => destroy(e));
@@ -461,25 +495,45 @@ scene("main", () => {
                 bossIndicator.pos = center().add(vec2(Math.cos(angle * Math.PI / 180) * 320, Math.sin(angle * Math.PI / 180) * 220));
                 bossIndicator.text = `⚠️ ${bName} (${Math.round(dirToBoss.len())}m) ➔`;
                 waveText.text = `WAVE: ${gameState.currentWave} (DEFEAT ${bName}! ${Math.max(0, Math.ceil(gameState.waveTimer))}s)`;
+
+                // Show Boss HP Bar strictly when boss is alive & deplete from RIGHT to LEFT
+                bossHpContainer.hidden = false;
+                bossHpContainer.opacity = 1;
+                const hpPct = Math.max(0, Math.min(1, b.hp / b.maxHp));
+                bossHpFill.width = 396 * hpPct;
+                bossHpLabel.text = `${bName}: ${Math.max(0, Math.ceil(b.hp))}/${Math.ceil(b.maxHp)} HP`;
             } else {
                 bossIndicator.opacity = 0;
+                bossHpContainer.opacity = 0; // Hide HP bar as soon as boss dies
+                bossHpContainer.hidden = true;
                 waveText.text = `WAVE: ${gameState.currentWave} (Time: ${Math.max(0, Math.ceil(gameState.waveTimer))}s)`;
             }
 
-            // 120s / 180s Time Out Handler: If time runs out, boss retreats and player gets regular shop
             if (gameState.waveTimer <= 0) {
                 get("enemy").forEach(e => destroy(e));
                 bossIndicator.opacity = 0;
+                bossHpContainer.opacity = 0;
+                bossHpContainer.hidden = true;
                 startShopPhase(false);
                 return;
             }
         }
 
-        get("enemy").forEach((e) => {
+        // Enemy movement & smooth, natural breathing animation
+        let timeFactor = time() * 3.5; // Significantly slowed down breathing rate for smooth visual comfort
+        get("enemy").forEach((e, idx) => {
             const dir = player.pos.sub(e.pos).unit();
-            e.move(dir.scale(e.speed));
 
             if (e.isMiniBoss) {
+                // Mini-Boss movement: Orbiting / Strafe movement pattern
+                let orbitAngle = time() * 2 + idx;
+                let perpDir = vec2(-dir.y, dir.x);
+                let moveVector = dir.scale(0.5).add(perpDir.scale(Math.sin(orbitAngle) * 0.9)).unit();
+                e.move(moveVector.scale(e.speed));
+
+                let pulse = Math.sin(timeFactor * 0.8) * 0.04;
+                e.scale = vec2(0.45 + pulse, 0.45 - pulse);
+
                 e.bossAttackTimer = (e.bossAttackTimer || 0) + dt();
                 if (e.bossAttackTimer >= 2.5) {
                     playSound('shoot');
@@ -496,9 +550,15 @@ scene("main", () => {
                     ]);
                     e.bossAttackTimer = 0;
                 }
-            }
+            } else if (e.isFinalBoss) {
+                // Final Boss movement: Relentless dash and chase pattern
+                let chargeCycle = Math.sin(time() * 1.2);
+                let currentSpeed = chargeCycle > 0.6 ? e.speed * 1.6 : e.speed * 0.8;
+                e.move(dir.scale(currentSpeed));
 
-            if (e.isFinalBoss) {
+                let pulse = Math.sin(timeFactor * 1.0) * 0.05;
+                e.scale = vec2(0.55 + pulse, 0.55 - pulse);
+
                 e.bossAttackTimer = (e.bossAttackTimer || 0) + dt();
                 if (e.bossAttackTimer >= 1.5) {
                     playSound('shoot');
@@ -522,6 +582,12 @@ scene("main", () => {
                     }
                     e.bossAttackTimer = 0;
                 }
+            } else {
+                // Normal Spudling movement with gentle, natural breathing rhythm
+                e.move(dir.scale(e.speed));
+                let pulse = Math.sin(timeFactor + idx) * 0.06; // Subtle 6% gentle pulse
+                let baseScale = 0.75;
+                e.scale = vec2(baseScale + pulse, baseScale - pulse);
             }
         });
 
@@ -536,10 +602,10 @@ scene("main", () => {
             if (spawnPos.x >= -4900 && spawnPos.x <= 4900 && spawnPos.y >= -4900 && spawnPos.y <= 4900) {
                 const baseEnemyHp = 2 + Math.floor(gameState.currentWave * 1.2);
                 
-                // Spawn Mini-Boss exactly ONCE during Wave 10
                 if (gameState.currentWave === 10 && !miniBossSpawned) {
                     miniBossSpawned = true;
-                    gameState.waveTimer = 120; // Exact 2 minute timer
+                    gameState.waveTimer = 120;
+                    let miniMaxHp = baseEnemyHp * 10;
                     add([
                         sprite("miniboss"),
                         pos(spawnPos),
@@ -550,16 +616,17 @@ scene("main", () => {
                         "enemy",
                         "boss",
                         { 
-                            hp: baseEnemyHp * 10, 
+                            hp: miniMaxHp, 
+                            maxHp: miniMaxHp,
                             speed: 85,
                             isMiniBoss: true,
                         }
                     ]);
                 } 
-                // Spawn Final Boss exactly ONCE during Wave 20
                 else if (gameState.currentWave === 20 && !finalBossSpawned) {
                     finalBossSpawned = true;
                     gameState.waveTimer = 180;
+                    let finalMaxHp = baseEnemyHp * 20;
                     add([
                         sprite("finalboss"),
                         pos(spawnPos),
@@ -570,7 +637,8 @@ scene("main", () => {
                         "enemy",
                         "boss",
                         { 
-                            hp: baseEnemyHp * 20, 
+                            hp: finalMaxHp, 
+                            maxHp: finalMaxHp,
                             speed: 105,
                             isFinalBoss: true,
                         }
@@ -601,6 +669,8 @@ scene("main", () => {
         gameState.isWaveActive = false;
         gameState.isPaused = true;
         bossIndicator.opacity = 0;
+        bossHpContainer.opacity = 0;
+        bossHpContainer.hidden = true;
         
         gameState.hp = gameState.maxHp;
         hpText.text = `HP: ${Math.ceil(gameState.hp)}/${gameState.maxHp}`;
@@ -637,7 +707,6 @@ scene("main", () => {
 
             let poolToUse = [...upgradePool, ...uniqueAbilitiesPool, ...mythicPool];
             if (isSpecialBossShop) {
-                // Special Mini-boss shop pool: Only Legendary and Mythic items
                 poolToUse = poolToUse.filter(item => item.rarity === "Legendary" || item.rarity === "Mythic");
             }
 
@@ -898,7 +967,6 @@ scene("main", () => {
             gameState.kills++;
             killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold.toFixed(2)}`;
 
-            // Victory upon defeating Final Boss on Wave 20
             if (isFinal) {
                 cheatOverlay.remove();
                 go("victory", {
@@ -914,11 +982,27 @@ scene("main", () => {
                 return;
             }
 
-            // Defeated Mini-Boss on Wave 10 -> Despawn mobs & open Special Boss Supply Shop!
             if (isMini) {
                 get("enemy").forEach(e => destroy(e));
                 startShopPhase(true);
             }
+        }
+    });
+
+    // Enemy projectile hitting the player
+    player.onCollide("enemy_bullet", (bullet) => {
+        if (gameState.isPaused || gameState.godMode) return;
+
+        destroy(bullet);
+        let dmg = bullet.damage || 5; // Default to 5 damage as requested
+        gameState.totalDamageTaken += dmg;
+        gameState.hp -= dmg;
+        playSound('hurt');
+        hpText.text = `HP: ${Math.max(0, Math.ceil(gameState.hp))}/${gameState.maxHp}`;
+
+        if (gameState.hp <= 0) {
+            cheatOverlay.remove();
+            go("gameover", { kills: gameState.kills, level: gameState.level });
         }
     });
 
@@ -958,7 +1042,6 @@ scene("victory", (stats) => {
         color(203, 213, 225),
     ]);
 
-    // Spacious stats breakdown panel
     const panel = add([
         rect(1000, 480, { radius: 12 }),
         pos(center().x, center().y + 25),
@@ -974,7 +1057,6 @@ scene("victory", (stats) => {
         color(52, 211, 153),
     ]);
 
-    // Format detailed buffs & abilities list with names and stack counts
     let detailedBuffs = [];
     if (stats.abilities.length > 0) {
         stats.abilities.forEach(a => detailedBuffs.push(`• ${a} (Unique Ability)`));
@@ -1009,7 +1091,6 @@ scene("victory", (stats) => {
         ]);
     });
 
-    // Action Buttons nicely spaced at the bottom
     const restartBtn = add([
         rect(280, 50, { radius: 8 }),
         pos(center().x - 160, center().y + 295),
