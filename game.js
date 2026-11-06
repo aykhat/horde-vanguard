@@ -377,7 +377,7 @@ scene("main", () => {
     cheatOverlay.style.cssText = 'display:none; position:fixed; top:20px; left:50%; transform:translateX(-50%); width:520px; background:rgba(15, 23, 42, 0.95); border:2px solid #a855f7; border-radius:8px; padding:15px; z-index:99999; font-family:sans-serif; box-shadow:0 10px 25px rgba(0,0,0,0.7);';
     cheatOverlay.innerHTML = `
         <div style="color:#a855f7; font-weight:bold; margin-bottom:8px; font-size:16px;">🛠️ DEV CHEAT CONSOLE</div>
-        <div style="color:#94a3b8; font-size:12px; margin-bottom:10px;">Commands: <b style="color:#f8fafc">godmode</b>, <b style="color:#f8fafc">addxp [num]</b>, <b style="color:#f8fafc">jumplevel [num]</b>, <b style="color:#f8fafc">skipwave [num]</b>, <b style="color:#f8fafc">addhp [num]</b>, <b style="color:#f8fafc">speed [num]</b>, <b style="color:#f8fafc">killall</b>, <b style="color:#f8fafc">levelup</b></div>
+        <div style="color:#94a3b8; font-size:12px; margin-bottom:10px;">Commands: <b style="color:#f8fafc">godmode</b>, <b style="color:#f8fafc">gold [num]</b>, <b style="color:#f8fafc">addxp [num]</b>, <b style="color:#f8fafc">jumplevel [num]</b>, <b style="color:#f8fafc">skipwave [num]</b>, <b style="color:#f8fafc">addhp [num]</b>, <b style="color:#f8fafc">speed [num]</b>, <b style="color:#f8fafc">killall</b>, <b style="color:#f8fafc">levelup</b></div>
         <input id="cheatInput" type="text" placeholder="Type command here..." style="width:100%; padding:8px; background:#1e293b; border:none; color:white; border-radius:4px; box-sizing:border-box; outline:none;" />
     `;
     document.body.appendChild(cheatOverlay);
@@ -406,6 +406,9 @@ scene("main", () => {
                 gameState.hp = 99999;
                 gameState.maxHp = 99999;
                 hpText.text = `HP: GODMODE`;
+            } else if (action === 'gold') {
+                gameState.gold += (val > 0 ? val : 100);
+                killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold}`;
             } else if (action === 'addxp') {
                 gameState.xp += (val > 0 ? val : 10);
                 if (gameState.xp >= gameState.xpToNextLevel) {
