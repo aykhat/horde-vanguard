@@ -1,11 +1,12 @@
-kaplay({
+// --- MYTHIC PROTOCOL: MAIN GAME SCRIPT ---
+const k = kaplay({
     width: 1280,
     height: 720,
     letterbox: true,
     background: [15, 23, 42],
+    global: true,
 });
 
-// Load the updated high-res Spud enemy sprite and custom boss sprites with exact filenames
 loadSprite("spudling", "enemy.png");
 loadSprite("miniboss", "mini_boss.png");
 loadSprite("finalboss", "final_boss.png");
@@ -20,7 +21,10 @@ scene("main", () => {
         level: 1,
         xpToNextLevel: 10,
         kills: 0,
-        gold: 0,
+        gold: 15,
+        totalGoldSpent: 0,
+        totalDamageDealt: 0,
+        totalDamageTaken: 0,
         currentWave: 1,
         waveTimer: 60,
         isWaveActive: true,
@@ -38,16 +42,6 @@ scene("main", () => {
 
     const uiBox = add([fixed(), z(100)]);
 
-    // Boss pointer indicator
-    const bossIndicator = uiBox.add([
-        text("⚠️ BOSS ➔", { size: 18 }),
-        pos(center().x, 60),
-        anchor("center"),
-        color(239, 68, 68),
-        opacity(0),
-        z(120),
-    ]);
-
     const hpText = uiBox.add([
         text(`HP: ${gameState.hp}/${gameState.maxHp}`, { size: 22 }),
         pos(30, 25),
@@ -60,7 +54,6 @@ scene("main", () => {
         color(59, 130, 246),
     ]);
 
-    // Visual XP Bar Container & Fill Indicator
     const xpBarBg = uiBox.add([
         rect(300, 14, { radius: 4 }),
         pos(30, 85),
@@ -92,9 +85,15 @@ scene("main", () => {
         color(168, 85, 247),
     ]);
 
-    const traitsContainer = uiBox.add([
-        pos(30, 168),
+    const bossIndicator = uiBox.add([
+        text("", { size: 20 }),
+        pos(center().x, 60),
+        anchor("center"),
+        color(239, 68, 68),
+        opacity(0),
     ]);
+
+    const traitsContainer = uiBox.add([pos(30, 168)]);
 
     const tooltipBox = uiBox.add([
         rect(240, 60, { radius: 6 }),
@@ -188,7 +187,6 @@ scene("main", () => {
         if (player.pos.y < -4800) player.pos.y = -4800;
         if (player.pos.y > 4800) player.pos.y = 4800;
 
-        // Magnet logic for XP gems
         get("gem").forEach(g => {
             if (g.pos.dist(player.pos) < gameState.magnetRadius || gameState.activeMythics.includes("Void Singularity")) {
                 g.move(player.pos.sub(g.pos).unit().scale(350));
@@ -196,7 +194,6 @@ scene("main", () => {
         });
     });
 
-    // Player collect XP gem logic
     player.onCollide("gem", (gem) => {
         destroy(gem);
         playSound('gem');
@@ -204,11 +201,9 @@ scene("main", () => {
         gameState.gold += (gem.value || 1);
         killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold}`;
 
-        // EXP Bar & Level up scaling logic
         if (gameState.xp >= gameState.xpToNextLevel) {
             gameState.level++;
             gameState.xp -= gameState.xpToNextLevel;
-            // Progressively harder to level up as XP requirements scale exponentially
             gameState.xpToNextLevel = Math.floor(gameState.xpToNextLevel * 1.5);
             playSound('levelup');
             showLevelUpMenu();
@@ -340,36 +335,10 @@ scene("main", () => {
         if (isKeyDown("up") || isKeyDown("w")) moveDir.y -= 1;
         if (isKeyDown("down") || isKeyDown("s")) moveDir.y += 1;
 
-        const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
-        for (let gp of gamepads) {
-            if (gp) {
-                let stickX = gp.axes[0];
-                let stickY = gp.axes[1];
-                let deadzone = 0.15;
-                if (Math.abs(stickX) > deadzone || Math.abs(stickY) > deadzone) {
-                    moveDir.x += stickX;
-                    moveDir.y += stickY;
-                }
-                if (gp.buttons[12] && gp.buttons[12].pressed) moveDir.y -= 1;
-                if (gp.buttons[13] && gp.buttons[13].pressed) moveDir.y += 1;
-                if (gp.buttons[14] && gp.buttons[14].pressed) moveDir.x -= 1;
-                if (gp.buttons[15] && gp.buttons[15].pressed) moveDir.x += 1;
-                break;
-            }
-        }
-
         if (moveDir.len() > 0) {
             moveDir = moveDir.unit();
             player.move(moveDir.scale(gameState.playerSpeed));
         }
-
-        // PERFORMANCE OPTIMIZATION: Cull bullets & distant entities that fly too far off-screen
-        get("bullet").forEach(b => {
-            if (b.pos.dist(player.pos) > 1400) destroy(b);
-        });
-        get("enemy_bullet").forEach(b => {
-            if (b.pos.dist(player.pos) > 1400) destroy(b);
-        });
     });
 
     let consoleOpen = false;
@@ -377,7 +346,7 @@ scene("main", () => {
     cheatOverlay.style.cssText = 'display:none; position:fixed; top:20px; left:50%; transform:translateX(-50%); width:520px; background:rgba(15, 23, 42, 0.95); border:2px solid #a855f7; border-radius:8px; padding:15px; z-index:99999; font-family:sans-serif; box-shadow:0 10px 25px rgba(0,0,0,0.7);';
     cheatOverlay.innerHTML = `
         <div style="color:#a855f7; font-weight:bold; margin-bottom:8px; font-size:16px;">🛠️ DEV CHEAT CONSOLE</div>
-        <div style="color:#94a3b8; font-size:12px; margin-bottom:10px;">Commands: <b style="color:#f8fafc">godmode</b>, <b style="color:#f8fafc">gold [num]</b>, <b style="color:#f8fafc">addxp [num]</b>, <b style="color:#f8fafc">jumplevel [num]</b>, <b style="color:#f8fafc">skipwave [num]</b>, <b style="color:#f8fafc">addhp [num]</b>, <b style="color:#f8fafc">speed [num]</b>, <b style="color:#f8fafc">killall</b>, <b style="color:#f8fafc">levelup</b></div>
+        <div style="color:#94a3b8; font-size:12px; margin-bottom:10px;">Commands: <b style="color:#f8fafc">godmode</b>, <b style="color:#f8fafc">gold (num)</b>, <b style="color:#f8fafc">addxp (num)</b>, <b style="color:#f8fafc">jumplevel (num)</b>, <b style="color:#f8fafc">skipwave (num)</b>, <b style="color:#f8fafc">addhp (num)</b>, <b style="color:#f8fafc">speed (num)</b>, <b style="color:#f8fafc">killall</b>, <b style="color:#f8fafc">levelup</b></div>
         <input id="cheatInput" type="text" placeholder="Type command here..." style="width:100%; padding:8px; background:#1e293b; border:none; color:white; border-radius:4px; box-sizing:border-box; outline:none;" />
     `;
     document.body.appendChild(cheatOverlay);
@@ -407,7 +376,7 @@ scene("main", () => {
                 gameState.maxHp = 99999;
                 hpText.text = `HP: GODMODE`;
             } else if (action === 'gold') {
-                gameState.gold += (val > 0 ? val : 100);
+                gameState.gold += (val > 0 ? val : 500);
                 killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold}`;
             } else if (action === 'addxp') {
                 gameState.xp += (val > 0 ? val : 10);
@@ -458,205 +427,6 @@ scene("main", () => {
         }
     });
 
-    let staticTimer = 0;
-    let meteorTimer = 0;
-    let solarTimer = 0;
-    let celestialTimer = 0;
-    let acidTrailTimer = 0;
-    let bladeAngle = 0;
-    let overlordAngle = 0;
-    let invulnerableTimer = 0;
-    let emergencyCooldown = 0;
-
-    onUpdate(() => {
-        if (gameState.isPaused) return;
-
-        if (invulnerableTimer > 0) invulnerableTimer -= dt();
-        if (emergencyCooldown > 0) emergencyCooldown -= dt();
-
-        if (gameState.activeMythics.includes("💫 Celestial Alignment")) {
-            celestialTimer += dt();
-            let stacks = gameState.mythicStacks["💫 Celestial Alignment"] || 1;
-            if (celestialTimer >= 10.0) {
-                gameState.attackDamage += (2 * stacks);
-                celestialTimer = 0;
-            }
-        }
-
-        if (gameState.activeMythics.includes("☣️ Acid Tsunami")) {
-            acidTrailTimer += dt();
-            let stacks = gameState.mythicStacks["☣️ Acid Tsunami"] || 1;
-            if (acidTrailTimer >= 0.25) { // Throttled frequency for lag-free performance
-                const trailPos = player.pos;
-                const acidPuddle = add([
-                    circle(15 + stacks * 5),
-                    color(132, 204, 22),
-                    opacity(0.3),
-                    pos(trailPos),
-                    anchor("center"),
-                    z(5)
-                ]);
-                wait(2.0 + stacks, () => destroy(acidPuddle));
-
-                get("enemy").forEach(e => {
-                    if (e.pos.dist(trailPos) < 20 + stacks * 5) {
-                        e.hp -= (0.5 * stacks);
-                        if (e.hp <= 0) { destroy(e); gameState.kills++; killText.text = `KILLS: ${gameState.kills}`; }
-                    }
-                });
-                acidTrailTimer = 0;
-            }
-        }
-
-        if (gameState.activeMythics.includes("🗡️ Blade Storm Halo")) {
-            let stacks = gameState.mythicStacks["🗡️ Blade Storm Halo"] || 1;
-            let bladeCount = Math.min(6, 2 + stacks); // Capped maximum blades to prevent heavy frame drops
-            bladeAngle += dt() * (2 + stacks * 0.5);
-
-            for (let i = 0; i < bladeCount; i++) {
-                let offset = (Math.PI * 2 / bladeCount) * i + bladeAngle;
-                let bladePos = player.pos.add(vec2(Math.cos(offset) * (90 + stacks * 10), Math.sin(offset) * (90 + stacks * 10)));
-                
-                get("enemy").forEach(e => {
-                    if (e.pos.dist(bladePos) < 25) {
-                        e.hp -= (0.4 * gameState.attackDamage * stacks);
-                        if (e.hp <= 0) { destroy(e); gameState.kills++; killText.text = `KILLS: ${gameState.kills}`; }
-                    }
-                });
-            }
-        }
-
-        if (gameState.activeMythics.includes("🧲 Quantum Gravity Well")) {
-            let stacks = gameState.mythicStacks["🧲 Quantum Gravity Well"] || 1;
-            get("gem").forEach(g => {
-                if (g.pos.dist(player.pos) < 800) {
-                    g.move(player.pos.sub(g.pos).unit().scale(250 + stacks * 150));
-                }
-            });
-        }
-
-        if (gameState.activeMythics.includes("☀️ Solar Nova")) {
-            solarTimer += dt();
-            let stacks = gameState.mythicStacks["☀️ Solar Nova"] || 1;
-            let cooldown = Math.max(1.0, 3.0 - (stacks * 0.4));
-            if (solarTimer >= cooldown) {
-                playSound('hit');
-                const nova = add([
-                    circle(120 + stacks * 25),
-                    color(245, 158, 11),
-                    opacity(0.4),
-                    pos(player.pos),
-                    anchor("center"),
-                    z(40)
-                ]);
-                wait(0.2, () => destroy(nova));
-
-                get("enemy").forEach(e => {
-                    if (e.pos.dist(player.pos) < 120 + stacks * 25) {
-                        e.hp -= (gameState.attackDamage * (2 + stacks));
-                        if (e.hp <= 0) { destroy(e); gameState.kills++; }
-                    }
-                });
-                killText.text = `KILLS: ${gameState.kills}`;
-                solarTimer = 0;
-            }
-        }
-
-        if (gameState.activeMythics.includes("🌀 Event Horizon")) {
-            let stacks = gameState.mythicStacks["🌀 Event Horizon"] || 1;
-            get("enemy").forEach(e => {
-                if (e.pos.dist(player.pos) < 100 + stacks * 20) {
-                    e.hp -= (0.15 * stacks);
-                    if (e.hp <= 0) { destroy(e); gameState.kills++; killText.text = `KILLS: ${gameState.kills}`; }
-                }
-            });
-        }
-
-        if (gameState.activeMythics.includes("👑 Overlord's Presence")) {
-            let stacks = gameState.mythicStacks["👑 Overlord's Presence"] || 1;
-            let droneCount = Math.min(4, stacks * 2);
-            overlordAngle += dt() * 3;
-
-            for (let i = 0; i < droneCount; i++) {
-                let offset = (Math.PI * 2 / droneCount) * i + overlordAngle;
-                let dronePos = player.pos.add(vec2(Math.cos(offset) * 80, Math.sin(offset) * 80));
-                
-                get("enemy").forEach(e => {
-                    if (e.pos.dist(dronePos) < 40) {
-                        e.hp -= (0.3 * gameState.attackDamage);
-                        if (e.hp <= 0) { destroy(e); gameState.kills++; killText.text = `KILLS: ${gameState.kills}`; }
-                    }
-                });
-            }
-        }
-
-        if (gameState.activeAbilities.includes("Static Discharge")) {
-            staticTimer += dt();
-            if (staticTimer >= 2.0) {
-                const enemies = get("enemy");
-                if (enemies.length > 0) {
-                    const target = enemies[Math.floor(Math.random() * enemies.length)];
-                    if (target && target.pos.dist(player.pos) < 400) {
-                        target.hp -= (gameState.attackDamage * 2);
-                        playSound('hit');
-                        const zap = add([
-                            rect(4, player.pos.dist(target.pos)),
-                            color(59, 130, 246),
-                            pos(player.pos),
-                            anchor("top"),
-                            rotate(target.pos.sub(player.pos).angle()),
-                            z(50)
-                        ]);
-                        wait(0.1, () => destroy(zap));
-
-                        if (target.hp <= 0) {
-                            destroy(target);
-                            gameState.kills++;
-                            killText.text = `KILLS: ${gameState.kills}`;
-                        }
-                    }
-                }
-                staticTimer = 0;
-            }
-        }
-
-        if (gameState.activeMythics.includes("☄️ Meteor Swarm")) {
-            meteorTimer += dt();
-            if (meteorTimer >= 1.5) {
-                const enemies = get("enemy");
-                if (enemies.length > 0) {
-                    const target = enemies[Math.floor(Math.random() * enemies.length)];
-                    if (target && target.pos.dist(player.pos) < 600) {
-                        const explosionPos = target.pos;
-                        playSound('hit');
-                        const fire = add([
-                            circle(24),
-                            color(249, 115, 22),
-                            outline(3, rgb(239, 68, 68)),
-                            pos(explosionPos),
-                            anchor("center"),
-                            area(),
-                            z(60)
-                        ]);
-                        wait(0.2, () => destroy(fire));
-
-                        get("enemy").forEach(e => {
-                            if (e.pos.dist(explosionPos) < 70) {
-                                e.hp -= (gameState.attackDamage * 3);
-                                if (e.hp <= 0) {
-                                    destroy(e);
-                                    gameState.kills++;
-                                    killText.text = `KILLS: ${gameState.kills}`;
-                                }
-                            }
-                        });
-                    }
-                }
-                meteorTimer = 0;
-            }
-        }
-    });
-
     let spawnTimer = 0;
     onUpdate(() => {
         if (gameState.isPaused || !gameState.isWaveActive) return;
@@ -666,6 +436,7 @@ scene("main", () => {
         if (!isBossWave) {
             gameState.waveTimer -= dt();
             waveText.text = `WAVE: ${gameState.currentWave} (Time: ${Math.max(0, Math.ceil(gameState.waveTimer))}s)`;
+            bossIndicator.opacity = 0;
 
             if (gameState.waveTimer <= 0) {
                 get("enemy").forEach(e => destroy(e));
@@ -674,32 +445,40 @@ scene("main", () => {
             }
         } else {
             const bossList = get("boss");
-            const bossCount = bossList.length;
-            if (bossCount > 0) {
-                waveText.text = `WAVE: ${gameState.currentWave} (DEFEAT THE BOSS!)`;
+            if (bossList.length > 0) {
+                const b = bossList[0];
+                const bName = gameState.currentWave === 10 ? "MINI-BOSS" : "FINAL BOSS";
+                waveText.text = `WAVE: ${gameState.currentWave} (DEFEAT ${bName}!)`;
                 
-                // Update boss pointer indicator
-                const bPos = bossList[0].pos;
-                const dirToBoss = bPos.sub(player.pos);
-                const screenCenter = center();
-                const dist = dirToBoss.len();
-
-                if (dist > 500) {
-                    bossIndicator.opacity = 1;
-                    const angle = dirToBoss.angle();
-                    bossIndicator.pos = screenCenter.add(vec2(Math.cos(angle) * 350, Math.sin(angle) * 220));
-                    bossIndicator.text = `⚠️ BOSS (${Math.round(dist)}m) ➔`;
-                } else {
-                    bossIndicator.opacity = 0;
-                }
+                const dirToBoss = b.pos.sub(player.pos);
+                bossIndicator.opacity = 1;
+                const angle = dirToBoss.angle();
+                bossIndicator.pos = center().add(vec2(Math.cos(angle * Math.PI / 180) * 320, Math.sin(angle * Math.PI / 180) * 220));
+                bossIndicator.text = `⚠️ ${bName} (${Math.round(dirToBoss.len())}m) ➔`;
             } else {
                 bossIndicator.opacity = 0;
-                startShopPhase();
-                return;
+                if (gameState.waveTimer <= 0) {
+                    // If Wave 20 final boss defeated, trigger VICTORY screen!
+                    if (gameState.currentWave === 20) {
+                        cheatOverlay.remove();
+                        go("victory", {
+                            level: gameState.level,
+                            dmgDealt: Math.round(gameState.totalDamageDealt),
+                            dmgTaken: Math.round(gameState.totalDamageTaken),
+                            abilities: gameState.activeAbilities,
+                            mythics: gameState.activeMythics,
+                            mythicStacks: gameState.mythicStacks,
+                            goldSpent: gameState.totalGoldSpent,
+                            goldLeft: gameState.gold
+                        });
+                        return;
+                    }
+                    startShopPhase();
+                    return;
+                }
             }
         }
 
-        // PERFORMANCE: Only update AI movement and checks for enemies within reasonable distance or batch them
         get("enemy").forEach((e) => {
             const dir = player.pos.sub(e.pos).unit();
             e.move(dir.scale(e.speed));
@@ -751,84 +530,79 @@ scene("main", () => {
         });
 
         spawnTimer += dt();
-        let currentSpawnInterval = isBossWave ? 2.2 : Math.max(0.25, 0.8 - (gameState.currentWave * 0.02));
+        let currentSpawnInterval = isBossWave ? 2.0 : Math.max(0.2, 0.8 - (gameState.currentWave * 0.03));
 
         if (spawnTimer >= currentSpawnInterval) {
-            // PERFORMANCE: Limit maximum active enemies on screen to prevent lag spikes
-            if (get("enemy").length < 120) {
-                const angle = rand(0, Math.PI * 2);
-                const distance = rand(800, 1100);
-                const spawnPos = player.pos.add(vec2(Math.cos(angle) * distance, Math.sin(angle) * distance));
+            const angle = rand(0, Math.PI * 2);
+            const distance = rand(800, 1100);
+            const spawnPos = player.pos.add(vec2(Math.cos(angle) * distance, Math.sin(angle) * distance));
 
-                if (spawnPos.x >= -4900 && spawnPos.x <= 4900 && spawnPos.y >= -4900 && spawnPos.y <= 4900) {
-                    const baseEnemyHp = 2 + Math.floor(gameState.currentWave * 1.2);
-                    
-                    if (gameState.currentWave === 10 && get("boss").length === 0) {
-                        add([
-                            sprite("miniboss"),
-                            pos(spawnPos),
-                            area(),
-                            body(),
-                            anchor("center"),
-                            scale(0.35),
-                            z(10),
-                            "enemy",
-                            "boss",
-                            { 
-                                hp: baseEnemyHp * 8, 
-                                speed: 90,
-                                isMiniBoss: true,
-                                name: "Mini Boss Warlord"
-                            }
-                        ]);
-                    } 
-                    else if (gameState.currentWave === 20 && get("boss").length === 0) {
-                        add([
-                            sprite("finalboss"),
-                            pos(spawnPos),
-                            area(),
-                            body(),
-                            anchor("center"),
-                            scale(0.45),
-                            z(10),
-                            "enemy",
-                            "boss",
-                            { 
-                                hp: baseEnemyHp * 15, 
-                                speed: 120,
-                                isFinalBoss: true,
-                                name: "Final Boss Leviathan"
-                            }
-                        ]);
-                    }
+            if (spawnPos.x >= -4900 && spawnPos.x <= 4900 && spawnPos.y >= -4900 && spawnPos.y <= 4900) {
+                const baseEnemyHp = 2 + Math.floor(gameState.currentWave * 1.2);
+                
+                if (gameState.currentWave === 10 && get("boss").length === 0) {
+                    add([
+                        sprite("miniboss"),
+                        pos(spawnPos),
+                        area(),
+                        body(),
+                        anchor("center"),
+                        scale(0.45),
+                        "enemy",
+                        "boss",
+                        { 
+                            hp: baseEnemyHp * 10, 
+                            speed: 85,
+                            isMiniBoss: true,
+                        }
+                    ]);
+                    gameState.waveTimer = -1; 
+                } 
+                else if (gameState.currentWave === 20 && get("boss").length === 0) {
+                    add([
+                        sprite("finalboss"),
+                        pos(spawnPos),
+                        area(),
+                        body(),
+                        anchor("center"),
+                        scale(0.55),
+                        "enemy",
+                        "boss",
+                        { 
+                            hp: baseEnemyHp * 20, 
+                            speed: 105,
+                            isFinalBoss: true,
+                        }
+                    ]);
+                    gameState.waveTimer = -1; 
+                }
 
-                    if (!isBossWave || Math.random() < 0.35) {
-                        add([
-                            sprite("spudling"),
-                            pos(spawnPos),
-                            area(),
-                            body(),
-                            anchor("center"),
-                            scale(0.8), // Clean visible scale for Enemy.png
-                            z(10),
-                            "enemy",
-                            { 
-                                hp: baseEnemyHp, 
-                                speed: rand(110, 140 + (gameState.currentWave * 2)),
-                            }
-                        ]);
-                    }
+                if (!isBossWave || Math.random() < 0.35) {
+                    add([
+                        sprite("spudling"),
+                        pos(spawnPos),
+                        area(),
+                        body(),
+                        anchor("center"),
+                        scale(0.75),
+                        "enemy",
+                        { 
+                            hp: baseEnemyHp, 
+                            speed: rand(110, 140 + (gameState.currentWave * 3)),
+                        }
+                    ]);
                 }
             }
             spawnTimer = 0;
         }
     });
 
-    // Enemy Projectile Collision with Player
     player.onCollide("enemy_bullet", (b) => {
-        if (gameState.isPaused || gameState.godMode || invulnerableTimer > 0) return;
+        if (gameState.isPaused || gameState.godMode) return;
         destroy(b);
-        gameState.hp -= b.damage || 15;
+        let dmg = b.damage || 15;
+        gameState.totalDamageTaken += dmg;
+        gameState.hp -= dmg;
         playSound('hurt');
         hpText.text = `HP: ${Math.max(0, Math.ceil(gameState.hp))}/${gameState.maxHp}`;
         if (gameState.hp <= 0) {
@@ -840,6 +614,7 @@ scene("main", () => {
     function startShopPhase() {
         gameState.isWaveActive = false;
         gameState.isPaused = true;
+        bossIndicator.opacity = 0;
         
         gameState.hp = gameState.maxHp;
         hpText.text = `HP: ${Math.ceil(gameState.hp)}/${gameState.maxHp}`;
@@ -857,24 +632,24 @@ scene("main", () => {
 
         shopOverlay.add([
             text(`WAVE ${gameState.currentWave} COMPLETED!`, { size: 36 }),
-            pos(center().x, 40),
+            pos(center().x, 50),
             anchor("center"),
             color(52, 211, 153),
         ]);
 
         const goldDisplay = shopOverlay.add([
             text(`Vanguard Supply Shop | Your Gold: $${gameState.gold}`, { size: 22 }),
-            pos(center().x, 80),
+            pos(center().x, 90),
             anchor("center"),
             color(251, 191, 36),
         ]);
 
-        const fullPool = [...upgradePool, ...uniqueAbilitiesPool, ...mythicPool];
-
         function renderShopCards() {
             shopOverlay.get("shop_card").forEach(c => destroy(c));
 
+            const fullPool = [...upgradePool, ...uniqueAbilitiesPool, ...mythicPool];
             const shopOptions = [];
+
             for (let i = 0; i < 3; i++) {
                 const totalWeight = fullPool.reduce((acc, card) => acc + card.weight, 0);
                 let randomVal = Math.random() * totalWeight;
@@ -888,12 +663,11 @@ scene("main", () => {
                     randomVal -= card.weight;
                 }
 
-                // Higher prices for powerful tiers
-                let price = 5;
-                if (selected.rarity === "Mythic") price = 45;
-                else if (selected.rarity === "Legendary") price = 30;
-                else if (selected.rarity === "Rare" || selected.rarity === "Unique Ability") price = 15;
-                else price = 8;
+                let price = 1;
+                if (selected.rarity === "Mythic") price = 20;
+                else if (selected.rarity === "Legendary") price = 15;
+                else if (selected.rarity === "Rare" || selected.rarity === "Unique Ability") price = 5;
+                else price = 1;
 
                 shopOptions.push({ ...selected, price });
             }
@@ -903,7 +677,7 @@ scene("main", () => {
                 const cardY = center().y + 10;
 
                 const card = shopOverlay.add([
-                    rect(320, 350, { radius: 12 }),
+                    rect(320, 320, { radius: 12 }),
                     pos(cardX, cardY),
                     anchor("center"),
                     color(30, 41, 59),
@@ -914,14 +688,14 @@ scene("main", () => {
 
                 card.add([
                     text(option.rarity.toUpperCase(), { size: 16 }),
-                    pos(0, -130),
+                    pos(0, -120),
                     anchor("center"),
                     color(option.color),
                 ]);
 
                 card.add([
                     text(option.name, { size: 18, width: 280, align: "center" }),
-                    pos(0, -90),
+                    pos(0, -80),
                     anchor("center"),
                     color(255, 255, 255),
                 ]);
@@ -934,8 +708,8 @@ scene("main", () => {
                 ]);
 
                 const chooseBtn = card.add([
-                    rect(240, 48, { radius: 8 }),
-                    pos(0, 110),
+                    rect(240, 44, { radius: 8 }),
+                    pos(0, 100),
                     anchor("center"),
                     color(gameState.gold >= option.price ? option.color : rgb(71, 85, 105)),
                 ]);
@@ -951,6 +725,7 @@ scene("main", () => {
                     if (gameState.gold < option.price) return;
 
                     gameState.gold -= option.price;
+                    gameState.totalGoldSpent += option.price;
                     goldDisplay.text = `Vanguard Supply Shop | Your Gold: $${gameState.gold}`;
                     killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold}`;
 
@@ -978,17 +753,16 @@ scene("main", () => {
 
         renderShopCards();
 
-        // Reroll Shop Button ($10)
         const rerollBtn = shopOverlay.add([
-            rect(200, 42, { radius: 8 }),
-            pos(center().x - 150, center().y + 220),
+            rect(180, 45, { radius: 8 }),
+            pos(center().x - 120, center().y + 260),
             anchor("center"),
-            color(245, 158, 11),
+            color(234, 179, 8),
             area(),
         ]);
 
-        const rerollText = rerollBtn.add([
-            text("REROLL SHOP ($10)", { size: 14 }),
+        rerollBtn.add([
+            text("REROLL ($10)", { size: 15 }),
             pos(0, 0),
             anchor("center"),
             color(15, 23, 42),
@@ -997,24 +771,23 @@ scene("main", () => {
         rerollBtn.onClick(() => {
             if (gameState.gold >= 10) {
                 gameState.gold -= 10;
+                gameState.totalGoldSpent += 10;
                 goldDisplay.text = `Vanguard Supply Shop | Your Gold: $${gameState.gold}`;
                 killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold}`;
-                playSound('hit');
                 renderShopCards();
             }
         });
 
-        // Continue Next Wave Button
         const nextWaveBtn = shopOverlay.add([
-            rect(200, 42, { radius: 8 }),
-            pos(center().x + 150, center().y + 220),
+            rect(220, 45, { radius: 8 }),
+            pos(center().x + 120, center().y + 260),
             anchor("center"),
             color(52, 211, 153),
             area(),
         ]);
 
         nextWaveBtn.add([
-            text("NEXT WAVE ➔", { size: 14 }),
+            text("NEXT WAVE ➔", { size: 15 }),
             pos(0, 0),
             anchor("center"),
             color(15, 23, 42),
@@ -1022,7 +795,6 @@ scene("main", () => {
 
         nextWaveBtn.onClick(() => {
             destroy(shopOverlay);
-
             gameState.currentWave++;
             gameState.waveTimer = 60;
             waveText.text = `WAVE: ${gameState.currentWave} (Time: 60s)`;
@@ -1077,15 +849,6 @@ scene("main", () => {
                     };
 
                     fireBullet();
-
-                    if (gameState.activeMythics.includes("⌛ Chrono Echo")) {
-                        let stacks = gameState.mythicStacks["⌛ Chrono Echo"] || 1;
-                        for (let s = 1; s <= stacks; s++) {
-                            wait(0.12 * s, () => {
-                                if (!gameState.isPaused && enemies.length > 0) fireBullet();
-                            });
-                        }
-                    }
                 }
             }
             gameState.attackTimer = 0;
@@ -1096,60 +859,13 @@ scene("main", () => {
         if (gameState.isPaused) return;
 
         destroy(bullet);
-        let damageDealt = bullet.damage;
-
-        if (gameState.activeMythics.includes("🌟 Supernova Core")) {
-            let stacks = gameState.mythicStacks["🌟 Supernova Core"] || 1;
-            if (Math.random() < 0.20 + (stacks * 0.1)) {
-                damageDealt *= (4 + stacks);
-            }
-        }
-
-        if (gameState.activeMythics.includes("🧊 Zero Kelvin Dilation")) {
-            let stacks = gameState.mythicStacks["🧊 Zero Kelvin Dilation"] || 1;
-            if (Math.random() < 0.25 + (stacks * 0.1)) {
-                damageDealt *= 2; 
-                enemy.color = rgb(147, 197, 253);
-            }
-        }
-
-        if (gameState.activeMythics.includes("🎯 Executioner's Mark")) {
-            let stacks = gameState.mythicStacks["🎯 Executioner's Mark"] || 1;
-            let threshold = 0.25 + (stacks * 0.05);
-            if ((enemy.hp / (2 + Math.floor(gameState.level * 0.7))) <= threshold) {
-                damageDealt = 9999;
-            }
-        }
-
-        enemy.hp -= damageDealt;
+        let dmg = bullet.damage;
+        gameState.totalDamageDealt += dmg;
+        enemy.hp -= dmg;
         playSound('hit');
-
-        if (gameState.activeMythics.includes("⚡ Chain Lightning Mastery")) {
-            let stacks = gameState.mythicStacks["⚡ Chain Lightning Mastery"] || 1;
-            let maxChains = 2 + stacks;
-            let chained = 0;
-            get("enemy").forEach(nearEnemy => {
-                if (nearEnemy !== enemy && chained < maxChains && nearEnemy.pos.dist(enemy.pos) < 200) {
-                    nearEnemy.hp -= (damageDealt * (0.6 + stacks * 0.1));
-                    chained++;
-                }
-            });
-        }
-
-        if (gameState.activeMythics.includes("🩸 Blood Sovereign")) {
-            let stacks = gameState.mythicStacks["🩸 Blood Sovereign"] || 1;
-            let healAmt = damageDealt * (0.10 * stacks);
-            gameState.hp = Math.min(gameState.maxHp, gameState.hp + healAmt);
-            hpText.text = `HP: ${Math.ceil(gameState.hp)}/${gameState.maxHp}`;
-        }
 
         if (enemy.hp <= 0) {
             let gemValue = 1 + Math.floor(gameState.level * 0.3);
-            if (gameState.activeMythics.includes("🧲 Quantum Gravity Well")) {
-                let stacks = gameState.mythicStacks["🧲 Quantum Gravity Well"] || 1;
-                gemValue = Math.floor(gemValue * (1.5 + stacks * 0.5));
-            }
-
             gameState.gold += gemValue;
 
             add([
@@ -1166,66 +882,131 @@ scene("main", () => {
             destroy(enemy);
             gameState.kills++;
             killText.text = `KILLS: ${gameState.kills} | GOLD: $${gameState.gold}`;
-
-            if (gameState.activeAbilities.includes("Vampiric Siphon") && gameState.kills % 5 === 0) {
-                gameState.hp = Math.min(gameState.maxHp, gameState.hp + 1);
-                hpText.text = `HP: ${Math.ceil(gameState.hp)}/${gameState.maxHp}`;
-            }
         }
     });
 
     player.onCollide("enemy", (enemy) => {
-        if (gameState.isPaused) return;
-        if (gameState.godMode || invulnerableTimer > 0) return;
+        if (gameState.isPaused || gameState.godMode) return;
 
         let dmg = 10;
-        if (gameState.activeMythics.includes("🛡️ Titanium Sentinel")) {
-            let stacks = gameState.mythicStacks["🛡️ Titanium Sentinel"] || 1;
-            dmg = Math.max(1, dmg * Math.pow(0.7, stacks));
-        }
-
+        gameState.totalDamageTaken += dmg;
         gameState.hp -= dmg;
         playSound('hurt');
-
-        if (gameState.hp <= 0 && gameState.activeMythics.includes("🔥 Hellfire Phoenix")) {
-            let stacks = gameState.mythicStacks["🔥 Hellfire Phoenix"] || 1;
-            if (gameState.mythicStacks["🔥 Hellfire Phoenix_revives"] === undefined) {
-                gameState.mythicStacks["🔥 Hellfire Phoenix_revives"] = 0;
-            }
-
-            if (gameState.mythicStacks["🔥 Hellfire Phoenix_revives"] < stacks) {
-                gameState.mythicStacks["🔥 Hellfire Phoenix_revives"]++;
-                gameState.hp = gameState.maxHp * 0.5;
-                playSound('mythic');
-                get("enemy").forEach(e => destroy(e));
-                hpText.text = `HP: ${Math.ceil(gameState.hp)}/${gameState.maxHp}`;
-                return;
-            }
-        }
-
-        if (gameState.activeMythics.includes("💥 Supernova Overdrive") && (gameState.hp / gameState.maxHp) < 0.30 && emergencyCooldown <= 0) {
-            let stacks = gameState.mythicStacks["💥 Supernova Overdrive"] || 1;
-            invulnerableTimer = 4.0 + (stacks * 2.0);
-            emergencyCooldown = 25.0;
-            playSound('mythic');
-
-            get("enemy").forEach(e => destroy(e));
-        }
-
         hpText.text = `HP: ${Math.max(0, Math.ceil(gameState.hp))}/${gameState.maxHp}`;
-
-        let pushForce = gameState.activeAbilities.includes("Thorn Armor") ? 120 : 50;
-        const pushDir = enemy.pos.sub(player.pos).unit();
-        enemy.pos = enemy.pos.add(pushDir.scale(pushForce));
-
-        if (gameState.activeAbilities.includes("Thorn Armor")) {
-            enemy.hp -= 2;
-        }
 
         if (gameState.hp <= 0) {
             cheatOverlay.remove();
             go("gameover", { kills: gameState.kills, level: gameState.level });
         }
+    });
+});
+
+scene("victory", (stats) => {
+    add([
+        rect(1280, 720),
+        color(15, 23, 42),
+    ]);
+
+    add([
+        text("🏆 VICTORY! FINAL BOSS DEFEATED! 🏆", { size: 36 }),
+        pos(center().x, 45),
+        anchor("center"),
+        color(251, 191, 36),
+    ]);
+
+    add([
+        text("Congratulations Vanguard! You successfully defended the realm against the Spud Horde!", { size: 16 }),
+        pos(center().x, 80),
+        anchor("center"),
+        color(203, 213, 225),
+    ]);
+
+    // Spacious stats breakdown panel
+    const panel = add([
+        rect(1000, 480, { radius: 12 }),
+        pos(center().x, center().y + 25),
+        anchor("center"),
+        color(30, 41, 59),
+        outline(3, rgb(52, 211, 153)),
+    ]);
+
+    panel.add([
+        text("📊 COMPREHENSIVE END GAME BATTLE STATISTICS & BUFFS", { size: 20 }),
+        pos(0, -215),
+        anchor("center"),
+        color(52, 211, 153),
+    ]);
+
+    // Format detailed buffs & abilities list with names and stack counts
+    let detailedBuffs = [];
+    if (stats.abilities.length > 0) {
+        stats.abilities.forEach(a => detailedBuffs.push(`• ${a} (Unique Ability)`));
+    }
+    if (stats.mythics.length > 0) {
+        stats.mythics.forEach(m => {
+            let stacks = stats.mythicStacks[m] || 1;
+            detailedBuffs.push(`• ${m} (Mythic Trait - Stacks: x${stacks})`);
+        });
+    }
+    if (detailedBuffs.length === 0) {
+        detailedBuffs.push("• None Acquired");
+    }
+
+    const statLines = [
+        `⚔️ Total Damage Dealt to Enemies: ${stats.dmgDealt.toLocaleString()}`,
+        `🛡️ Total Damage Taken by Player: ${stats.dmgTaken.toLocaleString()}`,
+        `⭐ Boss Defeated at Experience Level: ${stats.level}`,
+        `💰 Total Gold Spent in Shop: $${stats.goldSpent} | Gold Remaining: $${stats.goldLeft}`,
+        `✨ Detailed Buffs & Abilities Acquired (${detailedBuffs.length}):\n` + detailedBuffs.join("   |   ")
+    ];
+
+    statLines.forEach((line, idx) => {
+        let yOffset = -160 + (idx * 45);
+        if (idx === 4) yOffset = -10;
+
+        panel.add([
+            text(line, { size: 15, width: 920, align: "left" }),
+            pos(-460, yOffset),
+            anchor("topleft"),
+            color(248, 250, 252),
+        ]);
+    });
+
+    // Action Buttons nicely spaced at the bottom
+    const restartBtn = add([
+        rect(280, 50, { radius: 8 }),
+        pos(center().x - 160, center().y + 295),
+        anchor("center"),
+        color(52, 211, 153),
+        area(),
+    ]);
+
+    restartBtn.add([
+        text("RESTART GAME", { size: 16 }),
+        pos(0, 0),
+        anchor("center"),
+        color(15, 23, 42),
+    ]);
+
+    restartBtn.onClick(() => go("main"));
+
+    const exitBtn = add([
+        rect(280, 50, { radius: 8 }),
+        pos(center().x + 160, center().y + 295),
+        anchor("center"),
+        color(239, 68, 68),
+        area(),
+    ]);
+
+    exitBtn.add([
+        text("END GAME", { size: 16 }),
+        pos(0, 0),
+        anchor("center"),
+        color(255, 255, 255),
+    ]);
+
+    exitBtn.onClick(() => {
+        window.location.reload();
     });
 });
 
